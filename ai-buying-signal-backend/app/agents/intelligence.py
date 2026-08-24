@@ -68,7 +68,7 @@ CRITICAL RULES FOR EXTRACTION:
 3. "businessPain": Extract the actual business pain. If none exists, output exactly "Not detected". Do NOT hallucinate or output "Unknown".
 4. "detectedNeed": Extract the need. NEVER use a username, author name, company name, source name, or random word. If no need exists, output exactly "Not detected".
 5. "technology": Extract the actual technologies/models mentioned (e.g. "Qwen, Gemma, Llama"). If none, output exactly "Not detected".
-6. "iosysService": Match the business need to one of iOSYS's services: "Agentic AI", "Gen AI", "Staffing", "Web Development", "Partnership". If there is no clear match for these services, output exactly "Not detected".
+6. "iosysService": Match the business need to one of iOSYS's services: "Agentic AI", "Gen AI", "Web Development", "Digital Marketing", "Staffing", "Support & Maintenance", "Partnership". If there is no clear match for these services, output exactly "Not detected".
 7. "aiSummary": Provide a blisteringly fast, hyper-concise 1-2 sentence summary of the opportunity.
 8. NEVER invent information. If there is no evidence for a field, return "Not detected" (or null if boolean/integer).
 9. Output ONLY valid JSON matching this exact structure:

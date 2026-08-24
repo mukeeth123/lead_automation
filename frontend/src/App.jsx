@@ -751,6 +751,34 @@ function applyFilters(leads, filters) {
   return out;
 }
 
+function exportToCSV(leads, filename = "leads_export") {
+  if (!leads || !leads.length) return;
+  const headers = ["ID", "Company", "Title", "Content Snippet", "Source", "Intent Score", "Signal Type", "Technology", "iOSYS Opportunity", "Date", "URL"];
+  const rows = leads.map(l => [
+    l.id,
+    l.company,
+    l.title,
+    l.content ? l.content.substring(0, 250) : "",
+    l.source,
+    l.intentScore,
+    l.signalType,
+    l.technology,
+    l.iosysService || "Not detected",
+    l.publishedAt,
+    l.url
+  ].map(v => `"${String(v || "").replace(/"/g, '""')}"`).join(","));
+  
+  const csvContent = headers.join(",") + "\n" + rows.join("\n");
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `${filename}_${new Date().getTime()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 /* ---------------------------- Page: Overview ---------------------------- */
 
 function OverviewPage({ leads, nav }) {
@@ -862,7 +890,20 @@ function LeadsPage({ leads, filters, setFilters, nav }) {
   const chips = activeChips(filters, setFilters);
   return (
     <div>
-      <SectionTitle eyebrow={`${filtered.length} of ${leads.length} signals`} title="All Leads" />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <SectionTitle eyebrow={`${filtered.length} of ${leads.length} signals`} title="All Leads" />
+        <button 
+          onClick={() => exportToCSV(filtered, "all_filtered_leads")}
+          style={{
+            background: "var(--surface)", border: "1px solid var(--line)", padding: "6px 14px", 
+            borderRadius: 6, fontSize: 13, fontWeight: 600, color: "var(--ink)", 
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Export CSV
+        </button>
+      </div>
       <FilterBar filters={filters} setFilters={setFilters} />
       {chips.length > 0 && (
         <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
