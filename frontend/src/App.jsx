@@ -16,6 +16,13 @@ const FONT_IMPORT =
 const SOURCES = [
   { id: "indiehackers", name: "Indie Hackers", tag: "IH" },
   { id: "n8n", name: "n8n Community", tag: "N8N" },
+  { id: "hackernews", name: "Hacker News", tag: "HN" },
+  { id: "startup_networks", name: "Startup Networks", tag: "SN" },
+  { id: "uk_business_forums", name: "UK Business Forums", tag: "UKBF" },
+  { id: "bubble_forum", name: "Bubble Forum", tag: "BUB" },
+  { id: "remote_ok", name: "Remote OK", tag: "ROK" },
+  { id: "uk_contracts_finder", name: "UK Contracts Finder", tag: "UKCF" },
+  { id: "reddit", name: "Reddit", tag: "RDT" }
 ];
 const SOURCE_MAP = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
 
@@ -410,6 +417,48 @@ function SourceIcon({ id, size = 18 }) {
         <svg width={size} height={size} viewBox="0 0 24 24">
           <rect width="24" height="24" rx="4" fill="#E62B1E" />
           <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-display), sans-serif" fontWeight="700" fontSize="8.5" fill="#fff" letterSpacing="0.3">TED</text>
+        </svg>
+      );
+    case "startup_networks":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#6B46C1" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="9.5" fill="#fff">SN</text>
+        </svg>
+      );
+    case "uk_business_forums":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#00247D" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">UKBF</text>
+        </svg>
+      );
+    case "bubble_forum":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#1841FA" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">BUB</text>
+        </svg>
+      );
+    case "remote_ok":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#FF4742" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">ROK</text>
+        </svg>
+      );
+    case "uk_contracts_finder":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#005EA5" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">UKCF</text>
+        </svg>
+      );
+    case "reddit":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#FF4500" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">RDT</text>
         </svg>
       );
     default:
@@ -961,6 +1010,8 @@ function Empty() { return <div style={{ fontSize: 12, color: "var(--ink-soft)" }
 
 /* ---------------------------- Page: Lead Intelligence ---------------------------- */
 
+const _analyzingLeads = new Set();
+
 function LeadIntelPage({ lead, leads, nav }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [intel, setIntel] = useState(null);
@@ -972,6 +1023,12 @@ function LeadIntelPage({ lead, leads, nav }) {
       return;
     }
     
+    if (_analyzingLeads.has(lead.id)) {
+      setAnalyzing(true);
+      return; // Already analyzing this lead
+    }
+    
+    _analyzingLeads.add(lead.id);
     setIntel(null);
     setAnalyzing(true);
     fetch("http://localhost:8000/api/v1/leads/analyze", {
@@ -984,7 +1041,10 @@ function LeadIntelPage({ lead, leads, nav }) {
         setIntel(data);
       })
       .catch(err => console.error("Failed to analyze lead:", err))
-      .finally(() => setAnalyzing(false));
+      .finally(() => {
+        _analyzingLeads.delete(lead.id);
+        setAnalyzing(false);
+      });
   }, [lead]);
 
   if (!lead) return null;
@@ -994,12 +1054,16 @@ function LeadIntelPage({ lead, leads, nav }) {
   const activeTech = intel ? intel.technology : lead.technology;
   const activeService = intel ? intel.iosysService : lead.iosysService;
   
+  const activePain = intel ? intel.businessPain : lead.businessPain;
+
+  const isActive = (val) => val && val.trim().toLowerCase() !== "unknown" && val.trim().toLowerCase() !== "not detected";
+
   const evidence = [
     (intel ? intel.explicitRequirement : lead.explicitRequirement) && "Explicit requirement stated in the original signal",
-    "Clear business pain identified",
-    `Technology requirement: ${activeTech}`,
+    isActive(activePain) && "Clear business pain identified",
+    isActive(activeTech) && `Technology requirement: ${activeTech}`,
     lead.recentSignal && "Recent signal — detected within the last 14 days",
-    `Strong fit for iOSYS ${activeService}`,
+    isActive(activeService) && `Strong fit for iOSYS ${activeService}`,
   ].filter(Boolean);
 
   return (

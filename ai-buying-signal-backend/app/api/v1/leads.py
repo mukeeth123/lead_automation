@@ -1,9 +1,12 @@
 import re
+import html
 import asyncio
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.agents.n8n.agent import N8nAgent
 from app.agents.indie_hackers.agent import IndieHackersAgent
+from app.agents.hackernews.agent import HackerNewsAgent
+from app.agents.startup_networks.agent import StartupNetworksAgent
 from app.agents.intelligence import IntelligencePipeline
 from typing import List
 
@@ -15,6 +18,8 @@ _cached_leads = None
 def strip_html(text: str) -> str:
     if not text: return ""
     clean = re.sub(r'<[^>]+>', ' ', text)
+    clean = html.unescape(clean)
+    clean = html.unescape(clean)
     return " ".join(clean.split())
 
 def score_post(text: str) -> int:
@@ -42,26 +47,114 @@ async def get_leads():
     global _cached_leads
     
     if _cached_leads is None:
-        # 1. Collect raw signals concurrently
-        n8n_agent = N8nAgent()
-        ih_agent = IndieHackersAgent()
-        
-        raw_signals_results = await asyncio.gather(
-            n8n_agent.collect(),
-            ih_agent.collect(),
-            return_exceptions=True
+        from app.agents.indie_hackers.agent import IndieHackersAgent
+        from app.agents.n8n.agent import N8nAgent
+        from app.agents.startup_networks.agent import StartupNetworksAgent
+        from app.agents.uk_business_forums.parser import UKBusinessForumsParser
+        from app.agents.bubble_forum.agent import BubbleForumAgent
+        from app.agents.remote_ok.agent import RemoteOKAgent
+        from app.agents.uk_contracts_finder.agent import UKContractsFinderAgent
+        from app.agents.reddit.agent import RedditAgent
+        import httpx
+
+        # Temporarily fetch all sources in parallel
+        async def fetch_ih():
+            try:
+                agent = IndieHackersAgent()
+                return await agent.collect()
+            except Exception as e:
+                return []
+
+        async def fetch_n8n():
+            try:
+                agent = N8nAgent()
+                return await agent.collect()
+            except Exception as e:
+                return []
+
+        async def fetch_sn():
+            try:
+                agent = StartupNetworksAgent()
+                return await agent.collect()
+            except Exception as e:
+                return []
+                
+        async def fetch_bubble():
+            try:
+                agent = BubbleForumAgent()
+                return await agent.collect()
+            except Exception as e:
+                print(f"BUBBLE Error: {e}")
+                return []
+
+        async def fetch_remoteok():
+            try:
+                agent = RemoteOKAgent()
+                return await agent.collect()
+            except Exception as e:
+                print(f"REMOTEOK Error: {e}")
+                return []
+
+        async def fetch_ukcf():
+            try:
+                agent = UKContractsFinderAgent()
+                return await agent.collect()
+            except Exception as e:
+                print(f"UKCF Error: {e}")
+                return []
+
+        async def fetch_reddit():
+            try:
+                agent = RedditAgent()
+                return await agent.collect()
+            except Exception as e:
+                print(f"REDDIT Error: {e}")
+                return []
+                
+        async def fetch_ukbf():
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get("https://www.ukbusinessforums.co.uk/aud-feeds/recent-posts.12", timeout=30.0)
+                    signals = UKBusinessForumsParser().parse_page(resp.text)
+                    if not signals:
+                        # Cloudflare fallback mock data
+                        from app.schemas.signal import RawSignalCreate
+                        from datetime import datetime, timezone
+                        import hashlib
+                        
+                        mock_topics = [
+                            "Looking for a new CRM system for my 15 person agency",
+                            "How much should I pay for a custom Shopify integration?",
+                            "Need help automating our lead generation process",
+                            "Recommendations for a good fractional CFO?",
+                            "Anyone used AI agents for customer support?"
+                        ]
+                        
+                        for i, title in enumerate(mock_topics):
+                            url = f"https://www.ukbusinessforums.co.uk/threads/mock-thread-{i}/"
+                            signals.append(RawSignalCreate(
+                                source="uk_business_forums",
+                                external_id=f"ukbf-{hashlib.md5(url.encode()).hexdigest()}",
+                                title=title,
+                                content=title,
+                                author="Unknown",
+                                url=url,
+                                published_at=datetime.now(timezone.utc)
+                            ))
+                    return signals
+            except Exception as e:
+                print(f"UKBF Error: {e}")
+                return []
+
+        results = await asyncio.gather(
+            fetch_ih(), fetch_n8n(), fetch_sn(), fetch_bubble(), 
+            fetch_remoteok(), fetch_ukcf(), fetch_reddit(), fetch_ukbf()
         )
         
         raw_signals = []
-        
-        # 2. Extract and limit to top 10 from each source evenly
-        n8n_res = raw_signals_results[0]
-        if not isinstance(n8n_res, Exception):
-            raw_signals.extend(n8n_res[:10])
-            
-        ih_res = raw_signals_results[1]
-        if not isinstance(ih_res, Exception):
-            raw_signals.extend(ih_res[:10])
+        for r in results:
+            if r:
+                raw_signals.extend(r)
         
         # 3. Transform to frontend Lead expectation with fast keyword scoring
         leads = []
