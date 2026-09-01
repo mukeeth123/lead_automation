@@ -39,6 +39,18 @@ class SignalBase(BaseModel):
     confidence: Optional[float] = None
     ai_summary: Optional[str] = None
     
+    relevance: Optional[str] = None
+    commercial_intent: Optional[str] = None
+    service_fit: Optional[str] = None
+    noise_level: Optional[str] = None
+    evidence: list[str] = []
+    buying_stage: Optional[str] = None
+    region: Optional[str] = None
+    recommended_action: Optional[str] = None
+    
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    
     company_id: Optional[str] = None
     company: Optional[str] = None
     country: Optional[str] = None

@@ -22,7 +22,8 @@ const SOURCES = [
   { id: "bubble_forum", name: "Bubble Forum", tag: "BUB" },
   { id: "remote_ok", name: "Remote OK", tag: "ROK" },
   { id: "uk_contracts_finder", name: "UK Contracts Finder", tag: "UKCF" },
-  { id: "reddit", name: "Reddit", tag: "RDT" }
+  { id: "reddit", name: "Reddit", tag: "RDT" },
+  { id: "github", name: "GitHub", tag: "GH" }
 ];
 const SOURCE_MAP = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
 
@@ -295,14 +296,56 @@ function SignalBars({ score, size = "md" }) {
   );
 }
 
-function IntentCell({ score }) {
+function IntentCell({ score, breakdown }) {
+  const [open, setOpen] = useState(false);
   const t = tier(score);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('click', close);
+    window.addEventListener('close-intent-tooltips', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('close-intent-tooltips', close);
+    };
+  }, [open]);
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div 
+      style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: breakdown?.length ? "pointer" : "default", position: "relative", zIndex: open ? 99 : 1 }}
+      onClick={(e) => {
+        if (!breakdown?.length) return;
+        e.stopPropagation();
+        if (!open) {
+          window.dispatchEvent(new Event('close-intent-tooltips'));
+          setOpen(true);
+        } else {
+          setOpen(false);
+        }
+      }}
+    >
       <SignalBars score={score} size="sm" />
       <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 13, color: TIER_COLOR[t] }}>
         {score}
       </span>
+      {open && breakdown && breakdown.length > 0 && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, marginTop: 8, zIndex: 9999,
+          background: "var(--surface)", color: "var(--ink)", padding: 12, borderRadius: 6,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.12)", width: 260, border: "1px solid var(--line)",
+          fontFamily: "var(--font-body)", fontSize: 13, display: "flex", flexDirection: "column", gap: 6,
+          textAlign: "left"
+        }}>
+          <div style={{ fontWeight: 600, color: "var(--ink)", marginBottom: 4, borderBottom: "1px solid var(--line)", paddingBottom: 6 }}>Score Breakdown</div>
+          {breakdown.map((reason, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+              <span style={{ color: reason.startsWith("+") ? "var(--accent-teal)" : reason.startsWith("-") ? "var(--accent-rose)" : "var(--ink-soft)" }}>•</span>
+              <span style={{ lineHeight: 1.4 }}>{reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -626,7 +669,7 @@ function LeadTable({ leads, onOpen, showStatus = true, dense = false, showContac
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "var(--surface-2)", borderBottom: "1px solid var(--line)" }}>
-              {["Intent", "Company", showContact && "Contact", "Industry", "Source", "Signal Type", "Technology", !dense && "Business Pain", "Content Snippet", "Date", showStatus && "Status"]
+              {["Intent", "Priority", "Author", "Company", "Industry", "Source", "Signal Type", "Technology", !dense && "Business Pain", "AI Summary", "Date"]
                 .filter(Boolean)
                 .map((h) => (
                   <th key={h} style={{ textAlign: "left", padding: "9px 14px", fontWeight: 600, fontSize: 11, letterSpacing: "0.03em", textTransform: "uppercase", color: "var(--ink-soft)", whiteSpace: "nowrap" }}>{h}</th>
@@ -642,27 +685,25 @@ function LeadTable({ leads, onOpen, showStatus = true, dense = false, showContac
                 onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                <td style={{ padding: "10px 14px" }}><IntentCell score={l.intentScore} /></td>
-                <td style={{ padding: "10px 14px", fontWeight: 600, color: "var(--ink)" }}>{l.company}</td>
-                {showContact && (
-                  <td style={{ padding: "10px 14px", color: "var(--ink-soft)", fontFamily: "var(--font-mono)", fontSize: 12, maxWidth: 190, overflowWrap: "anywhere", wordBreak: "break-word", whiteSpace: "normal", lineHeight: 1.4 }}>
-                    {l.contactEmail || "—"}
-                  </td>
-                )}
+                <td style={{ padding: "10px 14px" }}><IntentCell score={l.intentScore} breakdown={l.scoreBreakdown} /></td>
+                <td style={{ padding: "10px 14px" }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: l.tierLabel === "HOT" ? TIER_COLOR.HOT : (l.tierLabel === "HIGH" ? TIER_COLOR.HIGH : (l.tierLabel === "LOW" ? TIER_COLOR.LOW : TIER_COLOR.MEDIUM)) }}>{l.tierLabel}</span>
+                </td>
+                <td style={{ padding: "10px 14px", fontWeight: 600, color: "var(--ink)" }}>{l.author}</td>
+                <td style={{ padding: "10px 14px", fontWeight: 600, color: "var(--ink-soft)" }}>
+                  {l.company} 
+                  {l.company !== "Unknown" && <span style={{ fontSize: 10, color: "var(--line)", marginLeft: 4 }}>{l.companyConfidence || 0}%</span>}
+                  {l.isNew && <span style={{ fontSize: 10, color: "var(--accent-teal)", marginLeft: 6, fontWeight: 700, padding: "2px 4px", background: "#0E7C861A", borderRadius: 3 }}>NEW</span>}
+                </td>
                 <td style={{ padding: "10px 14px", color: "var(--ink-soft)" }}>{l.industry}</td>
                 <td style={{ padding: "10px 14px" }}><SourceTag id={l.source} /></td>
                 <td style={{ padding: "10px 14px", color: "var(--ink-soft)", whiteSpace: "nowrap" }}>{l.signalType}</td>
                 <td style={{ padding: "10px 14px" }}>
                   <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent-teal)", background: "#0E7C860F", border: "1px solid #0E7C8633", padding: "2px 7px", borderRadius: 3 }}>{l.technology}</span>
                 </td>
-                {!dense && <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 220 }}>{l.businessPain}</td>}
-                <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 260 }}>{(l.originalSnippet || l.aiSummary || "").slice(0, 92)}...</td>
+                {!dense && <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 180 }}>{l.businessPain}</td>}
+                <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 220 }}>{(l.aiSummary && l.aiSummary !== "Unable to summarize." ? l.aiSummary : l.originalSnippet || "").slice(0, 92)}...</td>
                 <td style={{ padding: "10px 14px", color: "var(--ink-soft)", whiteSpace: "nowrap", fontFamily: "var(--font-mono)", fontSize: 12 }}>{fmtDate(l.publishedDate)}</td>
-                {showStatus && (
-                  <td style={{ padding: "10px 14px" }}>
-                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--ink-soft)", background: "var(--surface-2)", border: "1px solid var(--line)", padding: "2px 7px", borderRadius: 3, whiteSpace: "nowrap" }}>{l.status}</span>
-                  </td>
-                )}
               </tr>
             ))}
           </tbody>
@@ -700,11 +741,11 @@ function FilterBar({ filters, setFilters }) {
         <option value="">All Signal Types</option>
         {SIGNAL_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
       </select>
-      <select value={filters.minIntent} onChange={(e) => set("minIntent", Number(e.target.value))} style={input}>
-        <option value={0}>Any Intent</option>
-        <option value={50}>50+</option>
-        <option value={70}>70+</option>
-        <option value={85}>85+ Hot</option>
+      <select value={filters.tierLevel} onChange={(e) => set("tierLevel", e.target.value)} style={input}>
+        <option value="HOT">🔥 Direct Opportunity</option>
+        <option value="EARLY">🟡 Early Signal</option>
+        <option value="NOISE">⚪ Technical Noise</option>
+        <option value="ALL">All Signals</option>
       </select>
       <select value={filters.sort} onChange={(e) => set("sort", e.target.value)} style={input}>
         <option value="intent">Sort: Highest Intent</option>
@@ -727,19 +768,23 @@ function activeChips(filters, setFilters) {
   if (filters.country) chips.push({ label: filters.country, onRemove: () => clear("country", "") });
   if (filters.technology) chips.push({ label: filters.technology, onRemove: () => clear("technology", "") });
   if (filters.signalType) chips.push({ label: filters.signalType, onRemove: () => clear("signalType", "") });
-  if (filters.minIntent) chips.push({ label: `Intent ${filters.minIntent}+`, onRemove: () => clear("minIntent", 0) });
+  if (filters.tierLevel) chips.push({ label: filters.tierLevel, onRemove: () => clear("tierLevel", "") });
   return chips;
 }
 
 function applyFilters(leads, filters) {
   let out = leads.filter((l) => {
-    if (filters.search && !(`${l.company} ${l.businessPain} ${l.detectedNeed}`.toLowerCase().includes(filters.search.toLowerCase()))) return false;
+    if (filters.search && !(`${l.company} ${l.businessPain} ${l.detectedNeed} ${l.aiSummary} ${l.originalSnippet}`.toLowerCase().includes(filters.search.toLowerCase()))) return false;
     if (filters.source && l.source !== filters.source) return false;
     if (filters.industry && l.industry !== filters.industry) return false;
     if (filters.country && l.country !== filters.country) return false;
     if (filters.technology && l.technology !== filters.technology) return false;
     if (filters.signalType && l.signalType !== filters.signalType) return false;
-    if (filters.minIntent && l.intentScore < filters.minIntent) return false;
+    
+    if (filters.tierLevel === "HOT" && l.tierLabel !== "HOT") return false;
+    if (filters.tierLevel === "EARLY" && l.tierLabel !== "HIGH" && l.tierLabel !== "MEDIUM") return false;
+    if (filters.tierLevel === "NOISE" && l.tierLabel !== "LOW") return false;
+    
     return true;
   });
   if (filters.sort === "newest") out = [...out].sort((a, b) => a.daysAgo - b.daysAgo);
@@ -764,8 +809,8 @@ function exportToCSV(leads, filename = "leads_export") {
     l.signalType,
     l.technology,
     l.iosysService || "Not detected",
-    l.publishedAt,
-    l.url
+    l.publishedDate,
+    l.originalUrl
   ].map(v => `"${String(v || "").replace(/"/g, '""')}"`).join(","));
   
   const csvContent = headers.join(",") + "\n" + rows.join("\n");
@@ -781,9 +826,31 @@ function exportToCSV(leads, filename = "leads_export") {
 
 /* ---------------------------- Page: Overview ---------------------------- */
 
-function OverviewPage({ leads, nav }) {
+function OverviewPage({ leads, nav, backendStats }) {
   const [srcFilter, setSrcFilter] = useState(null);
   const [indFilter, setIndFilter] = useState(null);
+
+  // Render the Quality Summary banner if backend stats are provided
+  const renderQualitySummary = () => {
+    if (!backendStats || !backendStats.github) return null;
+    const { total, qualified, hot, early, noise } = backendStats.github;
+    return (
+      <div style={{ marginBottom: 24, padding: "16px 20px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 6, display: "flex", gap: 24, alignItems: "center" }}>
+        <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>GitHub Intelligence Pipeline:</div>
+        <div style={{ display: "flex", gap: 20, fontSize: 13 }}>
+          <div><span style={{ color: "var(--ink-soft)" }}>Total Signals:</span> <span style={{ fontWeight: 600 }}>{total.toLocaleString()}</span></div>
+          <div style={{ color: "var(--line)" }}>|</div>
+          <div><span style={{ color: "var(--ink-soft)" }}>Filtered Noise:</span> <span style={{ fontWeight: 600, color: "var(--ink-soft)" }}>{noise.toLocaleString()}</span></div>
+          <div style={{ color: "var(--line)" }}>|</div>
+          <div><span style={{ color: "var(--ink-soft)" }}>Qualified Leads:</span> <span style={{ fontWeight: 600, color: "var(--accent-teal)" }}>{qualified.toLocaleString()}</span></div>
+          <div style={{ color: "var(--line)" }}>|</div>
+          <div><span style={{ color: "var(--ink-soft)" }}>🔥 Hot:</span> <span style={{ fontWeight: 600, color: TIER_COLOR.HOT }}>{hot.toLocaleString()}</span></div>
+          <div style={{ color: "var(--line)" }}>|</div>
+          <div><span style={{ color: "var(--ink-soft)" }}>🟡 Early:</span> <span style={{ fontWeight: 600, color: TIER_COLOR.HIGH }}>{early.toLocaleString()}</span></div>
+        </div>
+      </div>
+    );
+  };
 
   const total = leads.length;
   const hot = leads.filter((l) => l.intentScore >= 85).length;
@@ -809,6 +876,7 @@ function OverviewPage({ leads, nav }) {
 
   return (
     <div>
+      {renderQualitySummary()}
       <div style={{ display: "flex", gap: 12, marginBottom: 22, flexWrap: "wrap" }}>
         <StatCard label="Total Signals" value={total} />
         <StatCard label="Hot Leads" value={hot} accent={TIER_COLOR.HOT} />
@@ -885,25 +953,103 @@ function OverviewPage({ leads, nav }) {
 
 /* ---------------------------- Page: Leads ---------------------------- */
 
-function LeadsPage({ leads, filters, setFilters, nav }) {
+function LeadsPage({ leads, filters, setFilters, nav, setLeads }) {
   const filtered = applyFilters(leads, filters);
   const chips = activeChips(filters, setFilters);
+  const [nlQuery, setNlQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchStatus, setSearchStatus] = useState("");
+
+  const handleNlSearch = async (e) => {
+    e.preventDefault();
+    if (!nlQuery.trim()) return;
+    setSearching(true);
+    setSearchStatus("Searching local database...");
+    try {
+      const response = await axios.post("http://127.0.0.1:8000/api/v1/leads/search", { query: nlQuery });
+      if (response.data && response.data.filters) {
+        setFilters({ ...filters, ...response.data.filters });
+        
+        // Live Fallback check
+        const currentMatched = applyFilters(leads, { ...filters, ...response.data.filters });
+        if (currentMatched.length < 5 && response.data.filters.live_search_keyword && response.data.filters.relevant_sources) {
+           setSearchStatus("Searching live sources for more matching leads... (this may take a minute)");
+           const fb = await axios.post("http://127.0.0.1:8000/api/v1/leads/live_fallback", { 
+               keyword: response.data.filters.live_search_keyword, 
+               sources: response.data.filters.relevant_sources 
+           });
+           if (fb.data && fb.data.newLeads && fb.data.newLeads.length > 0) {
+               setLeads(prev => {
+                   const existingIds = new Set(prev.map(l => l.id));
+                   const fresh = fb.data.newLeads.filter(l => !existingIds.has(l.id));
+                   return [...prev, ...fresh];
+               });
+           }
+        }
+        
+        setNlQuery("");
+      } else if (response.data && response.data.error) {
+        alert("Search failed: " + response.data.error);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to connect to search API. Is the backend running on port 8000?");
+    } finally {
+      setSearching(false);
+      setSearchStatus("");
+    }
+  };
+
+  const viewBtnStyle = {
+    background: "var(--surface)", border: "1px solid var(--line)", padding: "4px 10px", 
+    borderRadius: 6, fontSize: 12, fontWeight: 600, color: "var(--ink-soft)", 
+    cursor: "pointer", display: "flex", alignItems: "center", gap: 4
+  };
+
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
         <SectionTitle eyebrow={`${filtered.length} of ${leads.length} signals`} title="All Leads" />
-        <button 
-          onClick={() => exportToCSV(filtered, "all_filtered_leads")}
-          style={{
-            background: "var(--surface)", border: "1px solid var(--line)", padding: "6px 14px", 
-            borderRadius: 6, fontSize: 13, fontWeight: 600, color: "var(--ink)", 
-            cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          Export CSV
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", marginRight: 4 }}>QUICK VIEWS:</span>
+            <button onClick={() => setFilters({ ...emptyFilters(), tierLevel: "HOT" })} style={viewBtnStyle}>🔥 Hot</button>
+            <button onClick={() => setFilters({ ...emptyFilters(), tierLevel: "HIGH" })} style={viewBtnStyle}>🟡 High</button>
+            <button onClick={() => setFilters({ ...emptyFilters(), tierLevel: "EARLY" })} style={viewBtnStyle}>🔵 Early</button>
+            <button onClick={() => setFilters({ ...emptyFilters(), signalType: "Pain Point Post" })} style={viewBtnStyle}>💔 Pain</button>
+            
+            <button 
+            onClick={() => exportToCSV(filtered, "all_filtered_leads")}
+            style={{
+                background: "var(--surface)", border: "1px solid var(--line)", padding: "6px 14px", 
+                borderRadius: 6, fontSize: 13, fontWeight: 600, color: "var(--ink)", 
+                cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", marginLeft: 12
+            }}
+            >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Export
+            </button>
+        </div>
       </div>
+      
+      <form onSubmit={handleNlSearch} style={{ display: "flex", gap: 8, marginBottom: searchStatus ? 8 : 16 }}>
+        <input 
+          placeholder="Ask AI: e.g. 'Find hot AI automation leads in the US'" 
+          value={nlQuery} 
+          onChange={(e) => setNlQuery(e.target.value)}
+          style={{ flex: 1, padding: "10px 14px", border: "1px solid var(--line)", borderRadius: 6, fontSize: 14 }}
+        />
+        <button type="submit" disabled={searching} style={{ padding: "0 20px", background: "var(--accent-teal)", color: "#fff", border: "none", borderRadius: 6, fontWeight: 600, cursor: searching ? "not-allowed" : "pointer" }}>
+            {searching ? "Searching..." : "Search"}
+        </button>
+      </form>
+      
+      {searchStatus && (
+        <div style={{ fontSize: 12.5, color: "var(--accent-teal)", marginBottom: 16, display: "flex", alignItems: "center", gap: 8, fontWeight: 500 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 2s linear infinite" }}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          {searchStatus}
+        </div>
+      )}
+
       <FilterBar filters={filters} setFilters={setFilters} />
       {chips.length > 0 && (
         <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
@@ -1075,7 +1221,7 @@ function LeadIntelPage({ lead, leads, nav }) {
     fetch("http://localhost:8000/api/v1/leads/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: lead.company, content: lead.originalSnippet })
+      body: JSON.stringify({ title: lead.company, content: lead.originalSnippet, author: lead.author, source: lead.source, url: lead.originalUrl })
     })
       .then(res => res.json())
       .then(data => {
@@ -1099,13 +1245,15 @@ function LeadIntelPage({ lead, leads, nav }) {
 
   const isActive = (val) => val && val.trim().toLowerCase() !== "unknown" && val.trim().toLowerCase() !== "not detected";
 
-  const evidence = [
-    (intel ? intel.explicitRequirement : lead.explicitRequirement) && "Explicit requirement stated in the original signal",
-    isActive(activePain) && "Clear business pain identified",
-    isActive(activeTech) && `Technology requirement: ${activeTech}`,
+  const localEvidence = [
+    (intel ? intel.explicitRequirement : lead.explicitRequirement) && "Explicit project requirement stated in the original signal",
+    lead.intentScore >= 45 && `Commercial intent detected (Score: ${lead.intentScore})`,
+    isActive(activeTech) && `Specific tech need: ${activeTech}`,
+    isActive(intel ? intel.company : lead.company) && `Company identified: ${intel ? intel.company : lead.company}`,
     lead.recentSignal && "Recent signal — detected within the last 14 days",
-    isActive(activeService) && `Strong fit for iOSYS ${activeService}`,
   ].filter(Boolean);
+
+  const finalEvidence = (intel && intel.evidence && intel.evidence.length > 0) ? intel.evidence : localEvidence;
 
   return (
     <div>
@@ -1119,7 +1267,7 @@ function LeadIntelPage({ lead, leads, nav }) {
             <SourceTag id={lead.source} />
           </div>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 700 }}>{lead.company}</div>
-          <div style={{ color: "var(--ink-soft)", fontSize: 13, marginTop: 3 }}>{lead.industry} · {lead.country} · {fmtDate(lead.publishedDate)}</div>
+          <div style={{ color: "var(--ink-soft)", fontSize: 13, marginTop: 3 }}>{lead.industry} · {intel ? intel.region || lead.country : lead.country} · {fmtDate(lead.publishedDate)}</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 11, color: "var(--ink-soft)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em" }}>Intent Score</div>
@@ -1129,14 +1277,13 @@ function LeadIntelPage({ lead, leads, nav }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 20, alignItems: "start" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <Panel title="Original Signal">
-            <div style={{ fontStyle: "italic", color: "var(--ink)", fontSize: 13.5, lineHeight: 1.6, borderLeft: "3px solid var(--accent-teal)", paddingLeft: 12 }}>
-              “{lead.originalSnippet}”
-            </div>
-            <a href={lead.originalUrl} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "var(--accent-teal)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
-              {lead.originalUrl} ↗
-            </a>
-          </Panel>
+          {(intel?.aiSummary || (lead.aiSummary && lead.aiSummary !== "Unable to summarize.")) && (
+            <Panel title="AI Summary">
+              <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ink)", margin: 0 }}>{intel ? intel.aiSummary : lead.aiSummary}</p>
+            </Panel>
+          )}
+
+
 
           {analyzing && (
             <div style={{ padding: "40px 20px", textAlign: "center", border: "1px dashed var(--accent-teal)", borderRadius: 6, background: "#0E7C860C", color: "var(--accent-teal)" }}>
@@ -1146,7 +1293,7 @@ function LeadIntelPage({ lead, leads, nav }) {
                 </svg>
                 Extracting Deep Intelligence...
               </div>
-              <div style={{ fontSize: 12.5, opacity: 0.8 }}>Running Llama 3 analysis on {lead.source} post...</div>
+              <div style={{ fontSize: 12.5, opacity: 0.8 }}>Running LangGraph Agentic workflow on {lead.source} post...</div>
             </div>
           )}
           
@@ -1154,36 +1301,58 @@ function LeadIntelPage({ lead, leads, nav }) {
             @keyframes spin { 100% { transform: rotate(360deg); } }
           `}</style>
           
-          {intel && (
+          {intel && intel.signalType !== "Noise" && (
             <>
-              <Panel title="AI Summary">
-                <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ink)", margin: 0 }}>{intel.aiSummary}</p>
-              </Panel>
     
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <Panel title="Business Pain"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.businessPain}</p></Panel>
                 <Panel title="Detected Need"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.detectedNeed}</p></Panel>
+                
+                <Panel title="Buying Stage"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.buyingStage || "Unknown"}</p></Panel>
+                <Panel title="Recommended Action"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.recommendedAction || "Reach out to discuss requirements."}</p></Panel>
               </div>
+
+              <Panel title="Contact & Profiles">
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <ProfileLink label="Source Profile" value={intel.sourceProfileUrl} />
+                  <ProfileLink label="Company Website" value={intel.companyWebsite} />
+                  <ProfileLink label="Contact Page" value={intel.contactPage} />
+                  <ProfileLink label="Email" value={intel.contactEmail || intel.email || lead.contactEmail} isEmail />
+                  <ProfileLink label="Phone" value={intel.contactPhone || intel.phoneNumber} />
+                  <ProfileLink label="GitHub" value={intel.githubProfile} />
+                  <ProfileLink label="X/Twitter" value={intel.twitterProfile} />
+                  <ProfileLink label="LinkedIn" value={intel.linkedinProfile} />
+                  {(intel.otherProfiles || []).map((p, i) => <ProfileLink key={i} label={`Other (${i+1})`} value={p} />)}
+                  
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--line)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 4 }}>Verification (Confidence: {intel.contactConfidence || 0}/100)</div>
+                    <div style={{ fontSize: 13, color: "var(--ink)" }}>{intel.contactVerification || "Unknown"}</div>
+                  </div>
+                </div>
+              </Panel>
             </>
           )}
 
-          <Panel title="Why This Is A Lead">
+          <Panel title="Evidence & Verification">
             <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
-              {evidence.map((e, i) => (
+              {finalEvidence.map((e, i) => (
                 <li key={i} style={{ display: "flex", gap: 8, fontSize: 13, color: "var(--ink)" }}>
                   <span style={{ color: "var(--accent-teal)", fontWeight: 700 }}>✓</span>{e}
                 </li>
               ))}
             </ul>
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 16, flexWrap: "wrap" }}>
-              {["Budget unknown", "Timeline unknown", "Decision maker unknown"].map((u) => (
-                <span key={u} style={{ fontSize: 11.5, color: "var(--ink-soft)", fontFamily: "var(--font-mono)" }}>○ {u}</span>
-              ))}
-            </div>
           </Panel>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <Panel title="Original Signal">
+            <div style={{ fontStyle: "italic", color: "var(--ink)", fontSize: 13.5, lineHeight: 1.6, borderLeft: "3px solid var(--accent-teal)", paddingLeft: 12 }}>
+              “<TruncatedText text={lead.originalSnippet} max={250} />”
+            </div>
+            <a href={lead.originalUrl} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "var(--accent-teal)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
+              {lead.originalUrl} ↗
+            </a>
+          </Panel>
           <Panel title="Technology">
             <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent-teal)", background: "#0E7C860F", border: "1px solid #0E7C8633", padding: "4px 10px", borderRadius: 4 }}>{activeTech}</span>
           </Panel>
@@ -1193,16 +1362,19 @@ function LeadIntelPage({ lead, leads, nav }) {
             <div style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Mapped from detected technology and business pain.</div>
           </Panel>
 
-          <Panel title={`Related Signals ${related.length ? `(${related.length})` : ""}`}>
-            {related.length === 0 && <div style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>No other signals detected for this company yet.</div>}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {related.map((r) => (
-                <div key={r.id} onClick={() => nav.openLead(r.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 5, cursor: "pointer" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <SourceTag id={r.source} />
-                    <span style={{ fontSize: 12.5, color: "var(--ink)" }}>{r.signalType}</span>
+          <Panel title={`Cross-Source Timeline ${related.length ? `(${related.length + 1} signals)` : ""}`}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, borderLeft: "2px solid var(--line)", paddingLeft: 12, marginLeft: 6 }}>
+              {[lead, ...related].sort((a,b) => new Date(b.publishedDate) - new Date(a.publishedDate)).map((r) => (
+                <div key={r.id} onClick={() => nav.openLead(r.id)} style={{ position: "relative", padding: "10px", border: "1px solid var(--line)", borderRadius: 5, cursor: "pointer", background: r.id === lead.id ? "var(--chrome)" : "var(--surface)", color: r.id === lead.id ? "#fff" : "var(--ink)" }}>
+                  <div style={{ position: "absolute", left: -19, top: 16, width: 10, height: 10, borderRadius: 5, background: r.id === lead.id ? "var(--accent-teal)" : "var(--line)" }} />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <SourceTag id={r.source} />
+                      <span style={{ fontSize: 12, opacity: 0.8 }}>{fmtDate(r.publishedDate)}</span>
+                    </div>
+                    <IntentCell score={r.intentScore} breakdown={r.scoreBreakdown} />
                   </div>
-                  <IntentCell score={r.intentScore} />
+                  <div style={{ fontSize: 12.5 }}>{r.signalType}</div>
                 </div>
               ))}
             </div>
@@ -1210,6 +1382,19 @@ function LeadIntelPage({ lead, leads, nav }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function TruncatedText({ text, max }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!text || text.length <= max) return <>{text}</>;
+  return (
+    <>
+      {expanded ? text : `${text.slice(0, max)}... `}
+      <button onClick={() => setExpanded(!expanded)} style={{ background: "none", border: "none", color: "var(--accent-teal)", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: "inherit", marginLeft: 4 }}>
+        {expanded ? "Read less" : "Read more"}
+      </button>
+    </>
   );
 }
 
@@ -1221,6 +1406,26 @@ function Panel({ title, children }) {
     </div>
   );
 }
+
+function ProfileLink({ label, value, isEmail }) {
+  if (!value || value === "Unknown" || value === "Not detected" || value === "None") return null;
+  const isUrl = value.startsWith("http") || value.includes(".com") || value.includes(".io");
+  const href = isEmail ? `mailto:${value}` : (value.startsWith("http") ? value : `https://${value}`);
+  
+  return (
+    <div style={{ display: "flex", gap: 12, fontSize: 13, alignItems: "center", paddingBottom: 6, borderBottom: "1px solid #00000008" }}>
+      <span style={{ color: "var(--ink-soft)", width: 110, fontWeight: 500 }}>{label}</span>
+      {isUrl || isEmail ? (
+        <a href={href} target="_blank" rel="noreferrer" style={{ color: "var(--accent-teal)", wordBreak: "break-all", fontWeight: 500, textDecoration: "none" }}>
+          {value} ↗
+        </a>
+      ) : (
+        <span style={{ color: "var(--ink)", wordBreak: "break-all", fontWeight: 500 }}>{value}</span>
+      )}
+    </div>
+  );
+}
+
 
 /* ---------------------------- Page: Companies + Analytics ---------------------------- */
 
@@ -1322,9 +1527,185 @@ function CompaniesPage({ leads, nav }) {
   );
 }
 
+/* ---------------------------- AI Search Page ---------------------------- */
+
+function AiSearchPage({ leads, nav }) {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, loading]);
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!query.trim() || loading) return;
+
+    const userMsg = query;
+    setQuery("");
+    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
+    setLoading(true);
+
+    try {
+      const res = await axios.post("http://127.0.0.1:8000/api/v1/leads/search", { query: userMsg });
+      const filters = res.data.filters;
+      
+      if (!filters || Object.keys(filters).length === 0) {
+        setMessages(prev => [...prev, { role: "assistant", content: "I couldn't understand that query. Try asking something like 'Find me hot leads asking for n8n'." }]);
+        setLoading(false);
+        return;
+      }
+
+      // We have filters, let's just use the `applyFilters` logic from LeadsPage to get the results.
+      // But wait, applyFilters is local to LeadsPage?
+      // Actually, we can just use `nav.toLeads(filters)` to switch to the Leads view!
+      // But the user wants a ChatGPT UI where they "search leads from there".
+      // Let's render the matched leads as a small list inside the chat.
+      
+      const searchTerms = (filters.search || "").toLowerCase().split(" ").filter(Boolean);
+      let matched = leads.filter(l => {
+        if (filters.source && filters.source !== "ALL" && l.source !== filters.source) return false;
+        if (filters.industry && l.industry !== filters.industry) return false;
+        if (filters.tierLevel && filters.tierLevel !== "ALL") {
+          const t = l.intentScore >= 80 ? "HOT" : l.intentScore >= 50 ? "EARLY" : "NOISE";
+          if (t !== filters.tierLevel) return false;
+        }
+        if (searchTerms.length > 0) {
+          const text = (l.company + " " + l.originalSnippet + " " + (l.aiSummary || "")).toLowerCase();
+          if (!searchTerms.every(term => text.includes(term))) return false;
+        }
+        return true;
+      });
+
+      // Sort
+      if (filters.sort === "newest") {
+        matched.sort((a, b) => new Date(b.publishedDate) - new Date(a.publishedDate));
+      } else {
+        matched.sort((a, b) => b.intentScore - a.intentScore);
+      }
+      
+      setMessages(prev => [...prev, { role: "assistant", filters, results: matched }]);
+    } catch (err) {
+      setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error connecting to the AI brain." }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isInitial = messages.length === 0;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 52px)", maxWidth: 800, margin: "0 auto" }}>
+      {isInitial ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 700, marginBottom: 12 }}>Signal Intelligence</div>
+          <div style={{ color: "var(--ink-soft)", fontSize: 15, marginBottom: 30 }}>Discover high-intent business opportunities using natural language.</div>
+          
+          <div style={{ width: "100%", maxWidth: 640, marginBottom: 40 }}>
+            <form onSubmit={handleSearch} style={{ position: "relative", display: "flex", width: "100%" }}>
+              <input 
+                autoFocus
+                value={query} 
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="What leads are you looking for?" 
+                style={{ width: "100%", padding: "18px 54px 18px 24px", fontSize: 16, borderRadius: 30, border: "1px solid var(--line)", boxShadow: "0 8px 24px rgba(0,0,0,0.06)", outline: "none" }}
+              />
+              <button type="submit" disabled={!query.trim() || loading} style={{ position: "absolute", right: 10, top: 10, width: 40, height: 40, borderRadius: 20, background: query.trim() ? "var(--ink)" : "var(--line)", color: "#fff", border: "none", cursor: query.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", transition: "0.2s" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9L22 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </form>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", maxWidth: 640 }}>
+            {["Find hot AI automation leads from n8n", "Show me high intent companies in healthcare", "Looking for leads asking for API integration"].map(s => (
+              <div key={s} onClick={() => setQuery(s)} style={{ padding: "10px 16px", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 20, fontSize: 13, cursor: "pointer", color: "var(--ink-soft)", transition: "all 0.2s" }} onMouseOver={e => e.target.style.borderColor="var(--accent-teal)"} onMouseOut={e => e.target.style.borderColor="var(--line)"}>
+                {s}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ flex: 1, overflowY: "auto", padding: "20px 0", display: "flex", flexDirection: "column", gap: 24 }}>
+            {messages.map((m, i) => (
+              <div key={i} style={{ display: "flex", gap: 16, alignItems: "flex-start", padding: "10px 20px", background: m.role === "user" ? "transparent" : "var(--surface)", borderRadius: 8, border: m.role === "user" ? "none" : "1px solid var(--line)" }}>
+                <div style={{ width: 32, height: 32, borderRadius: 16, background: m.role === "user" ? "var(--ink)" : "var(--accent-teal)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontWeight: 700, fontSize: 13 }}>
+                  {m.role === "user" ? "U" : "AI"}
+                </div>
+                <div style={{ flex: 1, paddingTop: 6 }}>
+                  {m.role === "user" ? (
+                    <div style={{ fontSize: 15, fontWeight: 500 }}>{m.content}</div>
+                  ) : (
+                    <div>
+                      {m.content && <div style={{ fontSize: 14, color: "var(--ink)", lineHeight: 1.6 }}>{m.content}</div>}
+                      {m.filters && (
+                        <div style={{ marginBottom: 16, fontSize: 13, color: "var(--ink-soft)" }}>
+                          I found <b>{m.results.length}</b> leads matching: {JSON.stringify(m.filters)}
+                        </div>
+                      )}
+                      {m.results && m.results.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                          {m.results.slice(0, 10).map(r => (
+                            <div key={r.id} onClick={() => nav.openLead(r.id)} style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", cursor: "pointer", transition: "0.2s" }} onMouseOver={e => e.currentTarget.style.borderColor="var(--accent-teal)"} onMouseOut={e => e.currentTarget.style.borderColor="var(--line)"}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 15 }}>{r.company}</div>
+                                  <div style={{ fontSize: 12, color: "var(--ink-soft)", fontFamily: "var(--font-mono)" }}>
+                                    {r.source.toUpperCase()} • {fmtDate(r.publishedDate)}
+                                  </div>
+                                </div>
+                                <div style={{ fontWeight: 700, color: r.intentScore >= 80 ? "var(--accent-teal)" : "inherit" }}>{r.intentScore}</div>
+                              </div>
+                              <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{r.aiSummary || r.originalSnippet.slice(0,100)+"..."}</div>
+                            </div>
+                          ))}
+                          {m.results.length > 10 && <div style={{ fontSize: 12, color: "var(--ink-soft)", textAlign: "center", padding: "10px 0" }}>+ {m.results.length - 10} more (view in Leads table for full list)</div>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div style={{ display: "flex", gap: 16, padding: "10px 20px" }}>
+                 <div style={{ width: 32, height: 32, borderRadius: 16, background: "var(--accent-teal)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontWeight: 700, fontSize: 13 }}>AI</div>
+                 <div style={{ paddingTop: 6, fontSize: 14, color: "var(--ink-soft)" }}>Analyzing natural language...</div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          
+          <div style={{ padding: "20px 0" }}>
+            <form onSubmit={handleSearch} style={{ position: "relative", display: "flex" }}>
+              <input 
+                autoFocus
+                value={query} 
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="What leads are you looking for?" 
+                style={{ width: "100%", padding: "16px 50px 16px 20px", fontSize: 15, borderRadius: 24, border: "1px solid var(--line)", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", outline: "none" }}
+              />
+              <button type="submit" disabled={!query.trim() || loading} style={{ position: "absolute", right: 8, top: 8, width: 36, height: 36, borderRadius: 18, background: query.trim() ? "var(--ink)" : "var(--line)", color: "#fff", border: "none", cursor: query.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2L15 22L11 13M11 13L2 9L22 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </form>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ---------------------------- App shell ---------------------------- */
 
 const NAV_ITEMS = [
+  { id: "ai_search", label: "AI Search" },
   { id: "overview", label: "Overview" },
   { id: "leads", label: "Leads" },
   { id: "sources", label: "Source Intelligence" },
@@ -1332,11 +1713,12 @@ const NAV_ITEMS = [
 ];
 
 function emptyFilters() {
-  return { search: "", source: "", industry: "", country: "", technology: "", signalType: "", minIntent: 0, sort: "intent" };
+  return { search: "", source: "", industry: "", country: "", technology: "", signalType: "", tierLevel: "HOT", sort: "intent" };
 }
 
 export default function App() {
   const [rawLeads, setLeads] = useState([]);
+  const [backendStats, setBackendStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Dynamically normalize source IDs during render so it instantly applies via HMR without needing a refresh
@@ -1351,7 +1733,12 @@ export default function App() {
     async function fetchLeads() {
       try {
         const response = await axios.get("http://127.0.0.1:8000/api/v1/leads");
-        setLeads(response.data);
+        if (response.data && response.data.leads) {
+            setLeads(response.data.leads);
+            setBackendStats(response.data.stats);
+        } else {
+            setLeads(response.data);
+        }
       } catch (err) {
         console.error("Failed to fetch leads from backend", err);
         setLeads([]);
@@ -1440,8 +1827,9 @@ export default function App() {
 
       {/* Main */}
       <div style={{ flex: 1, padding: "26px 32px", minWidth: 0 }}>
-        {page === "overview" && <OverviewPage leads={leads} nav={nav} />}
-        {page === "leads" && <LeadsPage leads={leads} filters={filters} setFilters={setFilters} nav={nav} />}
+        {page === "ai_search" && <AiSearchPage leads={leads} nav={nav} />}
+        {page === "overview" && <OverviewPage leads={leads} nav={nav} backendStats={backendStats} />}
+        {page === "leads" && <LeadsPage leads={leads} filters={filters} setFilters={setFilters} nav={nav} setLeads={setLeads} />}
         {page === "sources" && <SourceIntelPage leads={leads} activeSource={activeSource} setActiveSource={setActiveSource} nav={nav} />}
         {page === "companies" && <CompaniesPage leads={leads} nav={nav} />}
         {page === "lead" && <LeadIntelPage lead={selectedLead} leads={leads} nav={nav} />}

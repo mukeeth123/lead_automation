@@ -17,3 +17,7 @@ class BaseSourceAgent(ABC):
     async def health_check(self) -> bool:
         """Verify the source is accessible and parsing works."""
         pass
+
+    async def search_live(self, query: str) -> List[RawSignalCreate]:
+        """Perform a targeted live search using a specific keyword/query."""
+        return []
