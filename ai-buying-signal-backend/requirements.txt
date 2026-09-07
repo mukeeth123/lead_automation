@@ -14,3 +14,4 @@ pgvector
 alembic
 openai
 python-dotenv
+python-dateutil

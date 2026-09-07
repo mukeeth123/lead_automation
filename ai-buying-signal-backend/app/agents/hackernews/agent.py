@@ -20,8 +20,8 @@ class HackerNewsAgent(BaseSourceAgent):
     async def collect(self) -> List[RawSignalCreate]:
         signals = []
         try:
-            # Get latest 50 Ask HN stories
-            story_ids = await self.client.fetch_ask_stories(limit=50)
+            # Get latest 200 Ask HN stories to ensure we find at least a few leads
+            story_ids = await self.client.fetch_ask_stories(limit=200)
             
             # Fetch full items in parallel
             items = await self.client.fetch_items(story_ids)

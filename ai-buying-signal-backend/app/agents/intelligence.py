@@ -75,9 +75,23 @@ async def call_llm_with_fallback(messages: List[Dict[str, str]], temperature: fl
             break
             
     if result_text is None:
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        if gemini_key:
+            logger.warning("Attempting Gemini 1.5 Flash Fallback...")
+            gemini_client = AsyncOpenAI(
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                api_key=gemini_key
+            )
+            try:
+                # When using Gemini through the OpenAI compatibility layer, the model name must often be exact or we get a 404
+                result_text = await _call(gemini_client, "gemini-1.5-flash")
+            except Exception as e:
+                logger.error(f"Gemini Fallback failed: {e}. Attempting OpenRouter Fallback...")
+
+    if result_text is None:
         or_key = os.environ.get("OPENROUTER_API_KEY")
         if not or_key:
-            raise ValueError("Groq API failed and no OPENROUTER_API_KEY provided in .env")
+            raise ValueError("Groq and Gemini APIs failed, and no OPENROUTER_API_KEY provided in .env")
         
         or_base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         
@@ -244,3 +258,38 @@ CRITICAL RULES FOR EXTRACTION:
         tasks = [self.analyze_signal(s.content, s.title) for s in raw_signals]
         results = await asyncio.gather(*tasks)
         return results
+
+class OutreachGenerator:
+    @staticmethod
+    async def generate(post_content: str, business_pain: str, detected_need: str) -> dict:
+        prompt = f"""
+        You are a top-tier B2B sales development representative for an IT and Marketing agency.
+        Write a highly personalized, non-spammy cold outreach email and a short LinkedIn DM for a lead based on this context:
+        
+        --- LEAD CONTEXT ---
+        Original Post/Signal: {post_content}
+        Identified Pain Point: {business_pain}
+        Detected Need: {detected_need}
+        --------------------
+        
+        Return ONLY valid JSON in this exact format, with no markdown formatting around it:
+        {{
+            "email_subject": "A catchy, relevant subject line",
+            "email_body": "The full email body, keeping it concise and value-driven.",
+            "linkedin_dm": "A short, casual message suitable for LinkedIn or Reddit DMs."
+        }}
+        """
+        messages = [{"role": "system", "content": prompt}]
+        try:
+            # Reusing the existing fallback/JSON logic
+            res_text = await call_llm_with_fallback(messages, temperature=0.7, max_tokens=600, expect_json=True)
+            match = re.search(r'\{.*\}', res_text, re.DOTALL)
+            json_str = match.group(0) if match else res_text
+            return json.loads(json_str)
+        except Exception as e:
+            logger.error(f"Failed to generate outreach: {e}")
+            return {
+                "email_subject": "Error generating outreach",
+                "email_body": f"Failed to generate outreach due to an AI error: {e}",
+                "linkedin_dm": "Error"
+            }

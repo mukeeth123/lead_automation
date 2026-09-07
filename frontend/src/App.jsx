@@ -23,7 +23,19 @@ const SOURCES = [
   { id: "remote_ok", name: "Remote OK", tag: "ROK" },
   { id: "uk_contracts_finder", name: "UK Contracts Finder", tag: "UKCF" },
   { id: "reddit", name: "Reddit", tag: "RDT" },
-  { id: "github", name: "GitHub", tag: "GH" }
+  { id: "github", name: "GitHub", tag: "GH" },
+  { id: "mastodon", name: "Mastodon", tag: "MST" },
+  { id: "stackexchange", name: "StackExchange", tag: "SE" },
+  { id: "hn_algolia", name: "Hacker News (Algolia API)", tag: "HNA" },
+  { id: "weworkremotely", name: "We Work Remotely", tag: "WWR" },
+  { id: "discourse", name: "Discourse Communities", tag: "DIS" },
+  { id: "remotive", name: "Remotive", tag: "RMV" },
+  { id: "himalayas", name: "Himalayas", tag: "HIM" },
+  { id: "producthunt", name: "Product Hunt", tag: "PH" },
+  { id: "freelancer", name: "FreeLancer", tag: "FL" },
+  { id: "hn_freelance", name: "Hacker News (Freelance)", tag: "HNF" },
+  { id: "upwork", name: "Upwork", tag: "UW" },
+  { id: "peopleperhour", name: "PeoplePerHour", tag: "PPH" }
 ];
 const SOURCE_MAP = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
 
@@ -502,6 +514,34 @@ function SourceIcon({ id, size = 18 }) {
         <svg width={size} height={size} viewBox="0 0 24 24">
           <rect width="24" height="24" rx="4" fill="#FF4500" />
           <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">RDT</text>
+        </svg>
+      );
+    case "freelancer":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#29B2FE" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">FL</text>
+        </svg>
+      );
+    case "upwork":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#14A800" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">UW</text>
+        </svg>
+      );
+    case "guru":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#005A9C" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">GR</text>
+        </svg>
+      );
+    case "hn_freelance":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#FF6600" />
+          <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">HNF</text>
         </svg>
       );
     default:
@@ -1202,6 +1242,8 @@ const _analyzingLeads = new Set();
 function LeadIntelPage({ lead, leads, nav }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [intel, setIntel] = useState(null);
+  const [generatingOutreach, setGeneratingOutreach] = useState(false);
+  const [outreachData, setOutreachData] = useState(null);
 
   React.useEffect(() => {
     if (!lead) return;
@@ -1234,9 +1276,33 @@ function LeadIntelPage({ lead, leads, nav }) {
       });
   }, [lead]);
 
+  const handleGenerateOutreach = async () => {
+    if (!intel && !lead) return;
+    setGeneratingOutreach(true);
+    setOutreachData(null);
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/leads/generate_outreach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          post_content: lead.originalSnippet,
+          business_pain: intel ? intel.businessPain : lead.businessPain,
+          detected_need: intel ? intel.detectedNeed : lead.detectedNeed
+        })
+      });
+      const data = await res.json();
+      setOutreachData(data);
+    } catch (err) {
+      console.error("Failed to generate outreach:", err);
+      setOutreachData({ error: "Failed to generate outreach." });
+    } finally {
+      setGeneratingOutreach(false);
+    }
+  };
+
   if (!lead) return null;
   const t = tier(lead.intentScore);
-  const related = leads.filter((l) => l.company === lead.company && l.id !== lead.id);
+  const related = (lead.company && !lead.company.startsWith("Unknown")) ? leads.filter((l) => l.company === lead.company && l.id !== lead.id) : [];
 
   const activeTech = intel ? intel.technology : lead.technology;
   const activeService = intel ? intel.iosysService : lead.iosysService;
@@ -1280,6 +1346,19 @@ function LeadIntelPage({ lead, leads, nav }) {
           {(intel?.aiSummary || (lead.aiSummary && lead.aiSummary !== "Unable to summarize.")) && (
             <Panel title="AI Summary">
               <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ink)", margin: 0 }}>{intel ? intel.aiSummary : lead.aiSummary}</p>
+            </Panel>
+          )}
+
+          {lead.metadata && Object.keys(lead.metadata).length > 0 && (
+            <Panel title="Source Metadata">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                {Object.entries(lead.metadata).map(([key, value]) => (
+                  <div key={key}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 4 }}>{key}</div>
+                    <div style={{ fontSize: 13, color: "var(--ink)" }}>{value}</div>
+                  </div>
+                ))}
+              </div>
             </Panel>
           )}
 
@@ -1342,6 +1421,90 @@ function LeadIntelPage({ lead, leads, nav }) {
               ))}
             </ul>
           </Panel>
+
+          {intel && intel.signalType !== "Noise" && (
+            <Panel title="AI Outreach Generation">
+              {!outreachData && !generatingOutreach && (
+                <div style={{ textAlign: "center", padding: "10px 0" }}>
+                  <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16, marginTop: 0 }}>
+                    Automatically draft a hyper-personalized email and DM based on this lead's exact pain point.
+                  </p>
+                  <button 
+                    onClick={handleGenerateOutreach}
+                    style={{
+                      background: "var(--accent-teal)", color: "#fff", border: "none", 
+                      padding: "8px 16px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
+                      fontFamily: "var(--font-sans)"
+                    }}
+                  >
+                    Generate Outreach Message ✨
+                  </button>
+                </div>
+              )}
+
+              {generatingOutreach && (
+                <div style={{ padding: "20px", textAlign: "center", color: "var(--accent-teal)" }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 2s linear infinite", marginBottom: 8 }}>
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>Drafting personalized outreach...</div>
+                </div>
+              )}
+
+              {outreachData && !outreachData.error && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 4 }}>Email Subject</div>
+                    <input 
+                      value={outreachData.email_subject || ""}
+                      onChange={(e) => setOutreachData({...outreachData, email_subject: e.target.value})}
+                      style={{ width: "100%", boxSizing: "border-box", padding: "8px 12px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, fontSize: 13, fontWeight: 600, color: "var(--ink)", fontFamily: "var(--font-sans)" }} 
+                    />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase" }}>Email Body</div>
+                      <a 
+                        href={`mailto:${intel.contactEmail || intel.email || lead.contactEmail || ''}?subject=${encodeURIComponent(outreachData.email_subject || '')}&body=${encodeURIComponent(outreachData.email_body || '')}`}
+                        target="_blank" rel="noreferrer"
+                        style={{ fontSize: 11, fontWeight: 600, background: "var(--accent-teal)", color: "#fff", padding: "4px 10px", borderRadius: 4, textDecoration: "none" }}
+                      >
+                        Open in Mail Client ↗
+                      </a>
+                    </div>
+                    <textarea 
+                      value={outreachData.email_body || ""}
+                      onChange={(e) => setOutreachData({...outreachData, email_body: e.target.value})}
+                      style={{ width: "100%", boxSizing: "border-box", padding: "12px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.6, minHeight: 180, resize: "vertical", color: "var(--ink)", fontFamily: "var(--font-sans)" }} 
+                    />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", textTransform: "uppercase" }}>LinkedIn / Social DM</div>
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(outreachData.linkedin_dm);
+                          if(intel.sourceProfileUrl && intel.sourceProfileUrl !== "Unknown") window.open(intel.sourceProfileUrl, '_blank');
+                          else if(lead.originalUrl) window.open(lead.originalUrl, '_blank');
+                        }}
+                        style={{ fontSize: 11, fontWeight: 600, background: "var(--accent-teal)", color: "#fff", border: "none", padding: "4px 10px", borderRadius: 4, cursor: "pointer" }}
+                      >
+                        Copy & Open Profile ↗
+                      </button>
+                    </div>
+                    <textarea 
+                      value={outreachData.linkedin_dm || ""}
+                      onChange={(e) => setOutreachData({...outreachData, linkedin_dm: e.target.value})}
+                      style={{ width: "100%", boxSizing: "border-box", padding: "12px", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: 6, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.6, minHeight: 100, resize: "vertical", color: "var(--ink)", fontFamily: "var(--font-sans)" }} 
+                    />
+                  </div>
+                </div>
+              )}
+              {outreachData && outreachData.error && (
+                <div style={{ color: "red", fontSize: 13, textAlign: "center" }}>{outreachData.error}</div>
+              )}
+            </Panel>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -1362,23 +1525,25 @@ function LeadIntelPage({ lead, leads, nav }) {
             <div style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Mapped from detected technology and business pain.</div>
           </Panel>
 
-          <Panel title={`Cross-Source Timeline ${related.length ? `(${related.length + 1} signals)` : ""}`}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, borderLeft: "2px solid var(--line)", paddingLeft: 12, marginLeft: 6 }}>
-              {[lead, ...related].sort((a,b) => new Date(b.publishedDate) - new Date(a.publishedDate)).map((r) => (
-                <div key={r.id} onClick={() => nav.openLead(r.id)} style={{ position: "relative", padding: "10px", border: "1px solid var(--line)", borderRadius: 5, cursor: "pointer", background: r.id === lead.id ? "var(--chrome)" : "var(--surface)", color: r.id === lead.id ? "#fff" : "var(--ink)" }}>
-                  <div style={{ position: "absolute", left: -19, top: 16, width: 10, height: 10, borderRadius: 5, background: r.id === lead.id ? "var(--accent-teal)" : "var(--line)" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <SourceTag id={r.source} />
-                      <span style={{ fontSize: 12, opacity: 0.8 }}>{fmtDate(r.publishedDate)}</span>
+          {related.length > 0 && (
+            <Panel title={`Cross-Source Timeline (${related.length + 1} signals)`}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, borderLeft: "2px solid var(--line)", paddingLeft: 12, marginLeft: 6 }}>
+                {[lead, ...related].sort((a,b) => new Date(b.publishedDate) - new Date(a.publishedDate)).map((r) => (
+                  <div key={r.id} onClick={() => nav.openLead(r.id)} style={{ position: "relative", padding: "10px", border: "1px solid var(--line)", borderRadius: 5, cursor: "pointer", background: r.id === lead.id ? "var(--chrome)" : "var(--surface)", color: r.id === lead.id ? "#fff" : "var(--ink)" }}>
+                    <div style={{ position: "absolute", left: -19, top: 16, width: 10, height: 10, borderRadius: 5, background: r.id === lead.id ? "var(--accent-teal)" : "var(--line)" }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <SourceTag id={r.source} />
+                        <span style={{ fontSize: 12, opacity: 0.8 }}>{fmtDate(r.publishedDate)}</span>
+                      </div>
+                      <IntentCell score={r.intentScore} breakdown={r.scoreBreakdown} />
                     </div>
-                    <IntentCell score={r.intentScore} breakdown={r.scoreBreakdown} />
+                    <div style={{ fontSize: 12.5 }}>{r.signalType}</div>
                   </div>
-                  <div style={{ fontSize: 12.5 }}>{r.signalType}</div>
-                </div>
-              ))}
-            </div>
-          </Panel>
+                ))}
+              </div>
+            </Panel>
+          )}
         </div>
       </div>
     </div>
@@ -1628,6 +1793,37 @@ function AiSearchPage({ leads, nav }) {
                 {s}
               </div>
             ))}
+          </div>
+
+          <div style={{ marginTop: 40, padding: "24px", background: "var(--surface)", border: "1px dashed var(--line)", borderRadius: 12, width: "100%", maxWidth: 640 }}>
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 16, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ color: "var(--accent-teal)" }}>✦</span> LangGraph Deep Discovery Pipeline
+            </div>
+            <div style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16 }}>
+              Run the advanced orchestration pipeline to dynamically discover, crawl, and qualify net-new leads from SearXNG, Reddit, and HackerNews.
+            </div>
+            <button 
+              onClick={async () => {
+                try {
+                  alert("Starting Deep Discovery via LangGraph...");
+                  const payloadQuery = query.trim() || "Find high intent B2B leads";
+                  const response = await axios.post("http://127.0.0.1:8000/api/v1/leads/discover", {
+                    query: payloadQuery
+                  });
+                  if (response.data && response.data.leads) {
+                    alert(`Discovered ${response.data.leads.length} new highly-qualified leads! Refresh the dashboard to see them.`);
+                  }
+                } catch (e) {
+                  console.error(e);
+                  alert("Deep Discovery failed.");
+                }
+              }}
+              style={{
+                background: "var(--chrome)", color: "#fff", border: "none", padding: "12px 24px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer"
+              }}
+            >
+              Discover: {query.trim() ? `"${query}"` : "All High Intent Leads"}
+            </button>
           </div>
         </div>
       ) : (

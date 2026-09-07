@@ -1,6 +1,7 @@
 import re
 import html
 import asyncio
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.agents.n8n.agent import N8nAgent
@@ -8,6 +9,14 @@ from app.agents.indie_hackers.agent import IndieHackersAgent
 from app.agents.hackernews.agent import HackerNewsAgent
 from app.agents.startup_networks.agent import StartupNetworksAgent
 from app.agents.intelligence import IntelligencePipeline
+from app.agents.mastodon.agent import MastodonAgent
+from app.agents.stackexchange.agent import StackExchangeAgent
+from app.agents.hn_algolia.agent import HNAlgoliaAgent
+from app.agents.weworkremotely.agent import WeWorkRemotelyAgent
+from app.agents.discourse.agent import DiscourseAgent
+from app.agents.remotive.agent import RemotiveAgent
+from app.agents.himalayas.agent import HimalayasAgent
+from app.agents.producthunt.agent import ProductHuntAgent
 from typing import List
 
 router = APIRouter()
@@ -26,37 +35,77 @@ def score_post(text: str) -> tuple[int, list[str]]:
     text = text.lower()
     score = 0
     breakdown = []
-    buying = ["buy", "hire", "looking for", "need a", "recommend", "price", "cost", "developer", "agency"]
-    pain = ["tired of", "annoyed", "hate", "stuck", "broken", "slow", "hard to", "can't scale"]
-    tech = ["ai", "saas", "api", "automation", "integration", "software", "app"]
     
-    b_match = sum(1 for k in buying if k in text)
+    # 1. Combinatorial Intents & Targets (Must have both to be Hot)
+    intents = ["looking for", "need a", "need an", "searching for", "recommend", "who should we", "has anyone worked with", "hire", "hiring", "who do you use", "any suggestions"]
+    targets = ["it staffing", "tech recruiting", "staffing firm", "recruiter", "recruiting agency", "staff augmentation", "contract-to-hire", "offshore", "nearshore", "rpo", "eor", "software engineers", "developers", "devops", "cybersecurity", "data engineer", "qa engineer", "tech talent"]
+    
+    # 2. Warm Signals
+    projects = ["scaling our engineering", "rapidly expanding", "building our engineering", "new product launch", "raised funding", "mass technical hiring", "doubling engineering"]
+    pain = ["struggling to hire", "behind roadmap", "losing candidates", "time-to-hire", "sitting open for months", "technical hiring process is broken", "ghost us", "not getting applicants", "can't retain", "interview scheduling is a nightmare", "making bad technical hires"]
+    tech = ["software", "api", "integration", "app", "cloud", "aws", "azure", "gcp", "react", "node", "python", "kubernetes", "docker", "machine learning", "llm", "sap", "salesforce", "cybersecurity", "network", "devops"]
+    capacity_gap = ["cto", "vp engineering", "head of data", "chief information officer", "ciso", "engineering leadership", "infrastructure team understaffed", "no internal technical recruiter"]
+    
+    # 3. Aggressive Negative Sellers & Noise List
+    sellers = ["i am a", "we are a", "available for", "my freelance", "my agency", "i built", "check out my", "our company provides", "i can help", "let me help", "hire me", "my portfolio", "i am an", "my services", "i offer", "student", "internship", "jobseeker", "looking for a job", "seeking employment", "resume", "apply now", "entry level", "bootcamp", "certification", "how to become"]
+    
+    # Ignore jobs that are clearly non-tech
+    non_tech_roles = ["maintenance technician", "landscaping", "nurse", "retail staff", "warehouse", "delivery driver", "plumber", "electrician", "cleaner", "cashier", "cook", "chef", "server", "bartender", "grounds location", "estimator"]
+    
+    b_match = 0
+    if any(i in text for i in intents) and any(t in text for t in targets):
+        b_match = 2
+        
+    proj_match = sum(1 for k in projects if k in text)
     p_match = sum(1 for k in pain if k in text)
     t_match = sum(1 for k in tech if k in text)
+    c_match = sum(1 for k in capacity_gap if k in text)
+    s_match = sum(1 for k in sellers if f" {k} " in f" {text} " or f" {k}." in f" {text}")
+    nt_match = sum(1 for k in non_tech_roles if k in text)
     
-    if b_match: 
-        pts = min(b_match * 10, 40)
-        score += pts
-        breakdown.append(f"+{pts}: Commercial intent keywords found")
-    if p_match: 
-        pts = min(p_match * 5, 20)
-        score += pts
-        breakdown.append(f"+{pts}: Pain point keywords found")
-    if t_match: 
-        pts = min(t_match * 5, 25)
-        score += pts
-        breakdown.append(f"+{pts}: Tech context keywords found")
-    
-    if b_match and t_match: 
-        score += 10
-        breakdown.append("+10: Commercial + Tech synergy bonus")
-    if b_match and p_match and t_match: 
-        score += 15
-        breakdown.append("+15: Buying + Pain + Tech master combo")
+    # Scoring
+    if s_match or nt_match:
+        penalty = min((s_match + nt_match) * 50, 100)
+        score -= penalty
+        breakdown.append(f"-{penalty}: Heavy Seller/Noise or Non-Tech Role penalty")
         
-    final_score = min(score, 100)
+    if b_match: 
+        pts = 50
+        score += pts
+        breakdown.append(f"+{pts}: Direct buying/agency intent (Intent + Tech Target matched)")
+    
+    if proj_match:
+        pts = min(proj_match * 15, 30)
+        score += pts
+        breakdown.append(f"+{pts}: Tech growth/scaling signals")
+        
+    if p_match: 
+        pts = min(p_match * 10, 20)
+        score += pts
+        breakdown.append(f"+{pts}: Tech hiring pain points")
+        
+    if t_match: 
+        pts = min(t_match * 5, 15)
+        score += pts
+        breakdown.append(f"+{pts}: Tech context keywords")
+        
+    if c_match:
+        pts = min(c_match * 20, 40)
+        score += pts
+        breakdown.append(f"+{pts}: Tech capacity gap / Leadership hiring signal")
+    
+    if (b_match or proj_match) and t_match: 
+        score += 15
+        breakdown.append("+15: Project + Tech synergy bonus")
+        
+    if p_match and t_match: 
+        score += 10
+        breakdown.append("+10: Pain + Tech master combo")
+        
+    final_score = max(0, min(score, 100))
     if final_score == 0:
         breakdown.append("0: No intent keywords detected")
+        
     return final_score, breakdown
 
 def score_github_post(text: str, title: str) -> tuple[int, list[str]]:
@@ -64,21 +113,21 @@ def score_github_post(text: str, title: str) -> tuple[int, list[str]]:
     score = 0
     breakdown = []
     
-    if any(k in text for k in ["looking for an agency", "looking for a development partner", "implementation partner"]):
-        score += 30
-        breakdown.append("+30: Explicit external help requirement")
+    if any(k in text for k in ["looking for an agency", "looking for a development partner", "implementation partner", "need an agency"]):
+        score += 85
+        breakdown.append("+85: Explicit external agency requirement")
     
-    if any(k in text for k in ["consultant", "consulting", "contractor", "freelancer", "freelance"]):
-        score += 25
-        breakdown.append("+25: Agency/consultant requirement")
+    if any(k in text for k in ["consultant", "consulting", "contractor", "freelancer", "freelance", "dev shop"]):
+        score += 40
+        breakdown.append("+40: Agency/consultant requirement")
         
     if any(k in text for k in ["paid project", "budget", "outsourcing", "hire", "hiring"]):
-        score += 20
-        breakdown.append("+20: Paid/budget language")
+        score += 30
+        breakdown.append("+30: Paid/budget language")
         
-    if any(k in text for k in ["need a developer", "need developers", "need someone to build", "implementation", "integration", "migration", "custom software", "automation", "ai implementation", "llm implementation", "rag implementation", "crm integration", "erp integration", "api integration", "cloud migration"]):
-        score += 15
-        breakdown.append("+15: Specific implementation requirement")
+    if any(k in text for k in ["need a developer", "need developers", "need someone to build", "implementation", "integration", "migration", "custom software", "automation", "ai implementation", "llm implementation", "rag implementation", "crm integration", "erp integration", "api integration", "cloud migration", "automate", "digital transformation", "building mvp"]):
+        score += 25
+        breakdown.append("+25: Specific implementation/project requirement")
         
     noise_penalties = {
         "good first issue": -40,
@@ -122,6 +171,10 @@ async def get_leads():
         from app.agents.uk_contracts_finder.agent import UKContractsFinderAgent
         from app.agents.reddit.agent import RedditAgent
         from app.agents.github.agent import GithubAgent
+        from app.agents.freelancer.agent import FreelancerAgent
+        from app.agents.hn_freelance.agent import HNFreelanceAgent
+        from app.agents.upwork.agent import UpworkAgent
+        from app.agents.peopleperhour.agent import PeoplePerHourAgent
         import httpx
 
         # Temporarily fetch all sources in parallel
@@ -153,6 +206,10 @@ async def get_leads():
             except Exception as e:
                 print(f"BUBBLE Error: {e}")
                 return []
+
+        async def fetch_peopleperhour():
+            try: return await PeoplePerHourAgent().collect()
+            except Exception as e: print(e); return []
 
         async def fetch_remoteok():
             try:
@@ -221,10 +278,58 @@ async def get_leads():
                 print(f"GITHUB Error: {e}")
                 return []
 
+        async def fetch_mastodon():
+            try: return await MastodonAgent().collect()
+            except Exception as e: print(e); return []
+            
+        async def fetch_stackexchange():
+            try: return await StackExchangeAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_hn_algolia():
+            try: return await HNAlgoliaAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_weworkremotely():
+            try: return await WeWorkRemotelyAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_discourse():
+            try: return await DiscourseAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_remotive():
+            try: return await RemotiveAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_himalayas():
+            try: return await HimalayasAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_producthunt():
+            try: return await ProductHuntAgent().collect()
+            except Exception as e: print(e); return []
+
+        async def fetch_freelancer():
+            try: return await FreelancerAgent().collect()
+            except Exception as e: print(e); return []
+            
+        async def fetch_hn_freelance():
+            try: return await HNFreelanceAgent().collect()
+            except Exception as e: print(e); return []
+            
+        async def fetch_upwork():
+            try: return await UpworkAgent().collect()
+            except Exception as e: print(e); return []
+
         results = await asyncio.gather(
             fetch_ih(), fetch_n8n(), fetch_sn(), fetch_bubble(), 
             fetch_remoteok(), fetch_ukcf(), fetch_reddit(), fetch_ukbf(),
-            fetch_github()
+            fetch_github(), fetch_mastodon(), fetch_stackexchange(),
+            fetch_hn_algolia(), fetch_weworkremotely(), fetch_discourse(),
+            fetch_remotive(), fetch_himalayas(), fetch_producthunt(),
+            fetch_freelancer(), fetch_hn_freelance(), fetch_upwork(),
+            fetch_peopleperhour()
         )
         
         
@@ -289,6 +394,19 @@ async def get_leads():
                 elif score >= 60: tier = "HIGH"
                 elif score >= 30: tier = "MEDIUM"
                 else: tier = "LOW"
+                
+            # Premium freelance client sources bypass the strict IT Staffing filter
+            # because founders often don't use words like "staffing" or "recruitment"
+            premium_client_sources = ["freelancer", "hn_freelance", "reddit", "upwork", "indie_hackers", "peopleperhour"]
+            
+            if s.source in premium_client_sources:
+                score = max(score, 90) # Give them a minimum score of 90 because it's a direct project post
+                tier = "HOT"
+                breakdown.append("90: Direct Premium Client Project Request")
+                
+            # STRICT FILTER: If it is LOW (doesn't meet keyword thresholds), drop it completely.
+            if tier == "LOW" and s.source not in premium_client_sources:
+                continue
             
             def get_company_fallback(s):
                 if s.source == "github":
@@ -315,14 +433,17 @@ async def get_leads():
                 "aiSummary": clean_content[:250] + ("..." if len(clean_content) > 250 else ""), 
                 "iosysService": "Unknown",
                 "publishedDate": s.published_at.isoformat(),
-                "daysAgo": 0,
+                "daysAgo": (datetime.now(timezone.utc) - s.published_at).days,
                 "status": "New",
                 "originalSnippet": clean_content,
                 "originalUrl": s.url,
                 "explicitRequirement": score >= 40,
                 "recentSignal": True,
-                "contactEmail": None
+                "contactEmail": None,
+                "metadata": s.metadata_ or {}
             })
+            
+
             
         stats = {
             "github": {
@@ -334,7 +455,11 @@ async def get_leads():
             }
         }
         
-        _cached_leads = {"leads": leads, "stats": stats}
+        # Only cache if we got a healthy amount of data
+        if len(leads) > 50:
+            _cached_leads = {"leads": leads, "stats": stats}
+        else:
+            return {"leads": leads, "stats": stats}
 
     return _cached_leads
 
@@ -542,7 +667,6 @@ async def live_fallback(req: LiveFallbackRequest):
                 }
                 new_leads.append(lead)
                 
-    # Sort
     new_leads.sort(key=lambda x: (x['intentScore'], x['companyConfidence']), reverse=True)
     return {
         "newLeads": new_leads, 
@@ -552,3 +676,64 @@ async def live_fallback(req: LiveFallbackRequest):
             "errors": [str(e) for e in results if isinstance(e, Exception)]
         }
     }
+
+class OutreachRequest(BaseModel):
+    post_content: str
+    business_pain: str
+    detected_need: str
+
+@router.post("/leads/generate_outreach")
+async def generate_outreach(req: OutreachRequest):
+    from app.agents.intelligence import OutreachGenerator
+    result = await OutreachGenerator.generate(
+        post_content=req.post_content,
+        business_pain=req.business_pain,
+        detected_need=req.detected_need
+    )
+    return result
+
+class DiscoveryRequest(BaseModel):
+    query: str
+
+@router.post("/leads/discover")
+async def discover_leads_via_graph(req: DiscoveryRequest):
+    from app.graph.discovery_graph import discovery_graph
+    
+    initial_state = {
+        "industry": "",
+        "service": "",
+        "icp": "",
+        "keywords": [],
+        "search_queries": [req.query], # We will store the initial raw query here to pass to the LLM
+        "discovered_urls": [],
+        "deduplicated_urls": [],
+        "current_url_index": 0,
+        "current_url_data": None,
+        "selected_crawler": "",
+        "extraction_failed": False,
+        "retry_count": 0,
+        "extracted_content": None,
+        "is_qualified": False,
+        "tier": None,
+        "score": 0,
+        "qualification_breakdown": [],
+        "enriched_company_info": None,
+        "saved_leads": [],
+        "errors": []
+    }
+    
+    try:
+        # Run the full LangGraph discovery and extraction pipeline
+        final_state = await discovery_graph.ainvoke(initial_state)
+        
+        return {
+            "status": "success",
+            "search_queries": final_state.get("search_queries", []),
+            "total_urls_discovered": len(final_state.get("deduplicated_urls", [])),
+            "leads": final_state.get("saved_leads", []),
+            "errors": final_state.get("errors", [])
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": str(e)}

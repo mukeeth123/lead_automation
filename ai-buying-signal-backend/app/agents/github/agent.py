@@ -30,10 +30,9 @@ class GithubAgent(BaseSourceAgent):
         since = (datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%d')
         
         queries = [
-            f'is:issue is:open ("looking for an agency" OR "development partner" OR "consultant" OR "freelancer") -label:"good first issue" -label:"documentation" created:>{since}',
-            f'is:issue is:open ("paid project" OR "budget" OR "outsourcing" OR "need a developer" OR "hiring") -label:"good first issue" -label:"documentation" created:>{since}',
-            f'is:issue is:open ("implementation" OR "integration" OR "migration" OR "custom software") -label:"good first issue" -label:"documentation" created:>{since}',
-            f'is:issue is:open ("automation" OR "AI implementation" OR "LLM implementation" OR "RAG implementation") -label:"good first issue" -label:"documentation" created:>{since}'
+            f'is:issue is:open ("need a developer" OR "need an agency" OR "looking for developer" OR "help building") created:>{since}',
+            f'is:issue is:open ("automate" OR "migration" OR "digital transformation" OR "building mvp") created:>{since}',
+            f'is:issue is:open ("ai integration" OR "api integration" OR "custom software") created:>{since}'
         ]
         
         try:
