@@ -176,7 +176,7 @@ function buildSnippet(sourceId, company, industry, tech) {
 function sourceUrl(sourceId, company, seedInt) {
   const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   switch (sourceId) {
-    case "reddit": return `https://reddit.com/r/b2bsaas/comments/${seedInt}/${slug}`;
+    case "reddit": return `https://www.reddit.com/r/forhire/search/?q=flair%3AHiring+${encodeURIComponent(slug)}&restrict_sr=1&sort=new`;
     case "hackernews": return `https://news.ycombinator.com/item?id=${38000000 + seedInt}`;
     case "x": return `https://x.com/${slug}/status/${1700000000000 + seedInt}`;
     case "indiehackers": return `https://indiehackers.com/post/${slug}-${seedInt}`;

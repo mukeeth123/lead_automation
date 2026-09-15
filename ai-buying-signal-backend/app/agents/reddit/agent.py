@@ -4,115 +4,149 @@ import time
 from app.schemas.signal import RawSignalCreate
 import re
 
+import feedparser
+from datetime import datetime, timezone, timedelta
+import time
+import re
+import html
+import asyncio
+from app.schemas.signal import RawSignalCreate
+
 class RedditAgent:
     def __init__(self):
-        # Target r/forhire and r/slavelabour looking for clients posting jobs
-        self.search_queries = [
-            "flair_name:\"Hiring\"",
-            "task" # for r/slavelabour
+        self.subreddits = [
+            "forhire",
+            "freelance_forhire",
+            "jobbit",
+            "techjobs",
+            "remote_jobs"
         ]
-        self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'}
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        }
+
+    def _is_seller(self, text: str) -> bool:
+        t = text.lower()
+        seller_patterns = [
+            "[for hire]", "[forhire]", "for hire", "[hire me]", "hire me",
+            "seeking work", "looking for work", "available for hire", "available for work",
+            "i am a developer", "i am an engineer", "i can build", "my portfolio", "my resume",
+            "open to work", "hire a developer", "portfolio:"
+        ]
+        return any(p in t for p in seller_patterns)
+
+    def _is_tech_buyer(self, title: str, desc: str) -> bool:
+        combined = (title + " " + desc).lower()
+        
+        # Check negative non-tech noise
+        non_tech = [
+            "guitar", "clothing", "storytime", "video editor", "video editing", 
+            "drawing", "hoodie", "lending operations", "virtual assistant", 
+            "transcription", "handwritten notes", "manga translator", "art commission"
+        ]
+        if any(w in combined for w in non_tech):
+            return False
+
+        # Must have buyer indicators
+        buyer_patterns = [
+            "[hiring]", "hiring", "[paid]", "looking for a developer", "looking for an engineer",
+            "need a developer", "need an engineer", "looking for an agency", "looking to hire",
+            "contract implementer", "seeking developer", "developer wanted"
+        ]
+        if not any(p in title.lower() for p in buyer_patterns):
+            return False
+
+        # Must match tech domain keywords
+        tech_patterns = [
+            "developer", "engineer", "software", "ai", "llm", "rag", "next.js", 
+            "react", "python", "full stack", "frontend", "backend", "web", "app", 
+            "cloud", "devops", "automation", "api", "database", "supabase", "postgres", 
+            "flutter", "ios", "android", "node", "typescript", "implementer"
+        ]
+        return any(k in combined for k in tech_patterns)
 
     async def collect(self):
         import httpx
-        import asyncio
-        import urllib.parse
-        
         signals = []
-        async def fetch_query(client, query, sub="forhire"):
-            try:
-                # URL encode the query for the RSS endpoint
-                encoded_q = urllib.parse.quote_plus(query)
-                url = f"https://www.reddit.com/r/{sub}/search.rss?q={encoded_q}&restrict_sr=1&sort=new&limit=100"
+
+        async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
+            for sub in self.subreddits:
+                try:
+                    url = f"https://www.reddit.com/r/{sub}/new.rss?limit=50"
+                    resp = await client.get(url, follow_redirects=True)
+                    if resp.status_code == 200:
+                        feed = feedparser.parse(resp.text)
+                        for entry in feed.entries:
+                            title = entry.title
+                            desc = getattr(entry, 'description', '')
+                            clean_desc = re.sub(r'<[^>]+>', ' ', desc)
+                            clean_desc = html.unescape(" ".join(clean_desc.split()))
+                            
+                            if self._is_seller(title + " " + clean_desc):
+                                continue
+                            if not self._is_tech_buyer(title, clean_desc):
+                                continue
+
+                            link = getattr(entry, 'link', '')
+                            if not link or "reddit.com/r/" not in link or "/comments/" not in link:
+                                continue
+
+                            pub_date = datetime.now(timezone.utc)
+                            if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                                pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed), timezone.utc)
+
+                            signals.append(RawSignalCreate(
+                                source="reddit",
+                                external_id=f"reddit-{entry.id if hasattr(entry, 'id') else link}",
+                                title=title,
+                                content=clean_desc[:1500],
+                                author=getattr(entry, 'author', 'Reddit Client').replace('/u/', ''),
+                                url=link,
+                                published_at=pub_date
+                            ))
+                except Exception as e:
+                    print(f"Reddit collect error for r/{sub}: {e}")
                 
-                resp = await client.get(url, headers=self.headers, timeout=15.0)
-                if resp.status_code == 200:
-                    feed = feedparser.parse(resp.text)
-                    sub_signals = []
-                    for entry in feed.entries:
-                        pub_date = datetime.now(timezone.utc)
-                        if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                            pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed), timezone.utc)
-                            
-                        # Filter for genuine leads from the last 14 days
-                        from datetime import timedelta
-                        cutoff_date = datetime.now(timezone.utc) - timedelta(days=14)
-                        if pub_date < cutoff_date:
-                            continue
-                            
-                        desc = getattr(entry, 'description', '')
-                        clean_desc = re.sub(r'<[^>]+>', '', desc)
-                        
-                        sub_signals.append(RawSignalCreate(
-                            source="reddit",
-                            external_id=f"reddit-{entry.id}",
-                            title=entry.title,
-                            content=clean_desc[:1000],
-                            author=getattr(entry, 'author', 'Reddit User'),
-                            url=entry.link,
-                            published_at=pub_date
-                        ))
-                    return sub_signals
-            except Exception as e:
-                print(f"Reddit Search Error ({query}): {e}")
-            return []
+                await asyncio.sleep(1.5)
 
-        async with httpx.AsyncClient() as client:
-            for query in self.search_queries:
-                sub = "slavelabour" if query == "task" else "forhire"
-                res = await fetch_query(client, query, sub=sub)
-                signals.extend(res)
-                # Sleep to prevent HTTP 429 Too Many Requests from Reddit
-                await asyncio.sleep(2.0)
-        
-        # Fallback if Reddit blocked us
-        if not signals:
-            return [
-                RawSignalCreate(
-                    source="reddit", external_id="reddit-mock-1",
-                    title="Looking for an agency to build our Voice AI agent",
-                    content="We are a healthcare startup looking to implement a Voice AI system. Need an agency with experience in Twilio and LLMs to help us build a 24/7 patient booking agent.",
-                    author="HealthTechFounder", url="https://reddit.com/r/SaaS", published_at=datetime.now(timezone.utc)
-                ),
-                RawSignalCreate(
-                    source="reddit", external_id="reddit-mock-2",
-                    title="Need help scaling our agentic AI workflow",
-                    content="We built an internal agentic AI tool using LangChain but it's too slow. Does anyone know a good IT services firm or consultant who can optimize our backend?",
-                    author="DevOpsLead99", url="https://reddit.com/r/MachineLearning", published_at=datetime.now(timezone.utc)
-                )
-            ]
-            
         return signals
-
-
 
     async def search_live(self, query: str) -> list[RawSignalCreate]:
         import httpx
-        import feedparser
         import urllib.parse
         signals = []
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
                 safe_q = urllib.parse.quote(query)
-                resp = await client.get(f"https://www.reddit.com/search.rss?q={safe_q}&sort=new", headers=self.headers, timeout=15.0)
+                resp = await client.get(f"https://www.reddit.com/search.rss?q={safe_q}&sort=new", follow_redirects=True)
                 if resp.status_code == 200:
                     feed = feedparser.parse(resp.text)
-                    for entry in feed.entries[:10]:
+                    for entry in feed.entries[:15]:
+                        title = entry.title
+                        desc = getattr(entry, 'description', '')
+                        clean_desc = re.sub(r'<[^>]+>', ' ', desc)
+                        clean_desc = html.unescape(" ".join(clean_desc.split()))
+
+                        if self._is_seller(title + " " + clean_desc):
+                            continue
+
+                        link = getattr(entry, 'link', '')
+                        if not link or "reddit.com/r/" not in link or "/comments/" not in link:
+                            continue
+
                         pub_date = datetime.now(timezone.utc)
                         if hasattr(entry, 'published_parsed') and entry.published_parsed:
                             pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed), timezone.utc)
-                        desc = getattr(entry, 'description', '')
-                        clean_desc = re.sub(r'<[^>]+>', '', desc)
-                        
+
                         signals.append(RawSignalCreate(
                             source="reddit",
-                            external_id=f"reddit-{entry.id}",
-                            title=entry.title,
-                            content=clean_desc[:1000],
-                            author=getattr(entry, 'author', 'Reddit User'),
-                            url=entry.link,
+                            external_id=f"reddit-{entry.id if hasattr(entry, 'id') else link}",
+                            title=title,
+                            content=clean_desc[:1500],
+                            author=getattr(entry, 'author', 'Reddit Client').replace('/u/', ''),
+                            url=link,
                             published_at=pub_date
                         ))
         except Exception as e:
-            print(f"Reddit search Error: {e}")
+            print(f"Reddit live search error: {e}")
         return signals
