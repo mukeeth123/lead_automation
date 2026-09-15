@@ -3,6 +3,7 @@ import operator
 
 class LeadDiscoveryState(TypedDict):
     # Discovery phase
+    campaign_name: str
     industry: str
     service: str
     icp: str

@@ -21,9 +21,15 @@ groq_client = AsyncOpenAI(
 GROQ_MODEL = os.environ.get("FALLBACK_MODEL", os.environ.get("GROQ_MODEL", "groq/compound-mini"))
 
 # Global rate limiting and deduplication
-_global_primary_semaphore = asyncio.Semaphore(1)
+_global_primary_semaphore = None
 _lead_analysis_locks = {}
 _lead_cache = {}
+
+def get_semaphore():
+    global _global_primary_semaphore
+    if _global_primary_semaphore is None:
+        _global_primary_semaphore = asyncio.Semaphore(1)
+    return _global_primary_semaphore
 
 async def call_llm_with_fallback(messages: List[Dict[str, str]], temperature: float = 0.0, max_tokens: int = 1024, expect_json: bool = True) -> str:
     async def _call(client_to_use, model_to_use):
@@ -52,7 +58,8 @@ async def call_llm_with_fallback(messages: List[Dict[str, str]], temperature: fl
     
     for attempt in range(max_retries):
         try:
-            async with _global_primary_semaphore:
+            sem = get_semaphore()
+            async with sem:
                 result_text = await _call(groq_client, GROQ_MODEL)
                 await asyncio.sleep(2.5) # Throttle
             break
@@ -60,8 +67,8 @@ async def call_llm_with_fallback(messages: List[Dict[str, str]], temperature: fl
             err_str = str(e)
             
             # Fail fast for hard limits like daily token limits, TPM limits, or auth errors
-            if 'tokens per day' in err_str.lower() or 'tpd' in err_str.lower() or 'tpm' in err_str.lower() or 'insufficient' in err_str.lower():
-                logger.warning(f"Groq Hard Limit reached: {err_str[:50]}. Instantly routing to OpenRouter Fallback...")
+            if 'tokens per day' in err_str.lower() or 'tpd' in err_str.lower() or 'tpm' in err_str.lower() or 'insufficient' in err_str.lower() or 'requests per day' in err_str.lower() or 'rpd' in err_str.lower():
+                logger.warning(f"Groq Hard Limit reached: {err_str[:50]}. Instantly routing to Fallback...")
                 break
                 
             if ('429' in err_str or '413' in err_str or '502' in err_str or '503' in err_str) and attempt < max_retries - 1:
@@ -83,7 +90,7 @@ async def call_llm_with_fallback(messages: List[Dict[str, str]], temperature: fl
                 api_key=gemini_key
             )
             try:
-                # When using Gemini through the OpenAI compatibility layer, the model name must often be exact or we get a 404
+                # When using Gemini through the OpenAI compatibility layer, use 'gemini-1.5-flash'
                 result_text = await _call(gemini_client, "gemini-1.5-flash")
             except Exception as e:
                 logger.error(f"Gemini Fallback failed: {e}. Attempting OpenRouter Fallback...")
@@ -287,9 +294,77 @@ class OutreachGenerator:
             json_str = match.group(0) if match else res_text
             return json.loads(json_str)
         except Exception as e:
-            logger.error(f"Failed to generate outreach: {e}")
-            return {
-                "email_subject": "Error generating outreach",
-                "email_body": f"Failed to generate outreach due to an AI error: {e}",
-                "linkedin_dm": "Error"
-            }
+            logger.error(f"Outreach generation failed: {e}")
+            return {"error": str(e), "subject": "Failed to generate", "body": "Failed to generate"}
+
+async def deep_qualify_post(content: str, title: str, source: str, campaign_name: str, company_services: list[str] = None, excluded_services: list[str] = None) -> dict:
+    default_services = [
+        "Custom Software Development",
+        "Web Application & SaaS Development",
+        "Mobile App Development (iOS, Android, Flutter, React Native)",
+        "AI, LLM, RAG & AI Agent Engineering",
+        "Data Migration & Database Engineering (Zoho, Supabase, Postgres, MySQL, MongoDB, Firebase, Cloud Migration)",
+        "Cloud Modernization & DevOps (AWS, Azure, GCP, Kubernetes, Docker)",
+        "API & System Integration (CRM, ERP, Zapier, Webhooks, Backend APIs)",
+        "Legacy System Modernization & Code Restoration",
+        "Business Process Automation & Workflow Engineering",
+        "MVP Development & Prototyping",
+        "Dedicated Engineering Teams & Staff Augmentation",
+        "Technical Support, QA & Site Maintenance"
+    ]
+    
+    if company_services and len(company_services) > 0:
+        merged_services = list(set(default_services + company_services))
+    else:
+        merged_services = default_services
+        
+    services_list = ", ".join(merged_services)
+    excluded_list = ", ".join(excluded_services) if excluded_services else "Physical non-tech labor, Cleaning, Medical doctor services, Real estate broker sales, Physical plumbing/electrical"
+    
+    prompt = f"""You are an elite B2B Lead Qualification Engine for IOSYS, a full-service custom software, AI, and digital transformation company.
+IOSYS provides ALL technology services including: AI/LLM solutions, custom software development, web & mobile applications, database & data migrations (e.g., Zoho to Supabase, SQL/NoSQL, cloud migration), API integrations, SaaS MVPs, cloud DevOps, automation, and ongoing technical support.
+
+## OUR SERVICE CATALOG (ALL TECH & SOFTWARE SERVICES):
+{services_list}
+
+## EXCLUDED NON-TECH SERVICES:
+{excluded_list}
+
+CRITICAL QUALIFICATION RULES:
+1. IOSYS handles ALL custom software, AI, web/mobile development, data migrations, integrations, cloud infrastructure, and technical consulting.
+2. If the client or author is looking to hire a developer, agency, consultant, or technical partner for ANY software, data migration, AI, integration, web, or mobile project -> THIS IS A DEFINITE SERVICE MATCH (service_match: true, is_looking_for_external_provider: true, is_active_request: true).
+3. Data migrations (such as Zoho to Supabase, database sync, CRM migration, cloud transfer) are CORE services provided by IOSYS. Always qualify these as HOT or QUALIFIED.
+4. Only reject if the post is pure spam, non-technical physical labor, or a jobseeker looking to be hired as an employee rather than a project/client.
+
+Content Title: {title}
+Content Source: {source}
+Extracted Content: {content[:3000]}
+
+Respond ONLY with valid JSON exactly matching this schema:
+{{
+"is_active_request": true/false,
+"requested_service": "string (the specific technical service or project need)",
+"requested_service_category": "string (e.g., Data Migration, AI Engineering, Web Development, Custom Software)",
+"service_match": true/false,
+"matched_company_service": "string (the closest matching service from our catalog)",
+"service_match_confidence": <float 0.8 to 1.0 for valid tech/software/migration needs>,
+"intent_type": "EXPLICIT_SERVICE_REQUEST or VENDOR_SEARCH",
+"is_looking_for_external_provider": true/false,
+"lead_status": "HOT, HIGH, WARM, or QUALIFIED",
+"problem_detected": "string (clear description of the business problem or project need)",
+"ai_summary": "string (2-3 sentence summary explaining why this is a great commercial opportunity for IOSYS)",
+"rejection_reason": null
+}}
+"""
+    try:
+        messages = [{"role": "user", "content": "You return valid JSON.\n" + prompt}]
+        response_text = await call_llm_with_fallback(messages, temperature=0.0)
+        match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            return data
+        else:
+            return {"error": "Failed to parse LLM JSON"}
+    except Exception as e:
+        logger.error(f"Deep qualification failed: {e}")
+        return {"error": str(e)}

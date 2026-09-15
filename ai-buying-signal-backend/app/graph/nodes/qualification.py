@@ -6,67 +6,103 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+def static_pre_filter(text: str) -> tuple[bool, str]:
+    """Fast regex/substring filter to drop obvious noise before calling the LLM."""
+    text_lower = text.lower()
+    
+    # 1. Reject Seller noise (agencies, freelancers promoting themselves)
+    sellers = [
+        "we built an", "i started an", "how to start an", "check out our",
+        "i am a", "we are a", "available for", "my freelance", "my agency",
+        "i built", "check out my", "our company provides", "i can help",
+        "let me help", "hire me", "my portfolio", "i am an", "my services",
+        "i offer", "we offer", "our services", "services we provide"
+    ]
+    for s in sellers:
+        if s in text_lower:
+            return False, f"Static Reject: Seller noise detected ('{s}')"
+            
+    # 2. Reject Co-founder / Partner noise
+    partners = [
+        "looking for a co-founder", "looking for a cofounder",
+        "looking for a business partner", "need a co-founder",
+        "seeking a cofounder", "seeking a business partner"
+    ]
+    for p in partners:
+        if p in text_lower:
+            return False, f"Static Reject: Co-founder/Partner search ('{p}')"
+            
+    # 3. Reject Educational / News noise
+    edu_news = [
+        "is changing the industry", "tools you should use", "how i automated",
+        "tutorial", "guide on how to", "my journey building",
+        "ask hn: what do you think", "what do you guys think about"
+    ]
+    for e in edu_news:
+        if e in text_lower:
+            return False, f"Static Reject: Educational/News/Discussion ('{e}')"
+            
+    # 4. Reject Explicitly Excluded Services
+    excluded = [
+        "seo", "social media marketing", "content writing", "meta ads",
+        "google ads", "ppc", "influencer marketing", "video editing",
+        "video creation", "voice acting", "graphic design", "recruitment",
+        "accounting", "legal services", "real estate services", "virtual assistant"
+    ]
+    
+    # We require a bit more boundary checking for short terms like "seo" to avoid matching inside words
+    import re
+    for ex in excluded:
+        pattern = r'\b' + re.escape(ex) + r'\b'
+        if re.search(pattern, text_lower):
+            # If the post contains heavily excluded terms and doesn't explicitly mention dev/software, reject it immediately
+            if not any(dev_term in text_lower for dev_term in ["software", "app", "developer", "development", "saas", "api"]):
+                return False, f"Static Reject: Excluded service detected ('{ex}')"
+
+    # 5. Reject India / South-Asia geo-targeted posts
+    india_signals = [
+        "delhi ncr", "delhi/ncr", "people based in india", "india only", "indian only",
+        "based in india", "located in india", "india-based", "mumbai based", "bangalore based",
+        "hyderabad based", "pune based", "chennai based", "kolkata based",
+        "for indians only", "india location", "india candidates",
+        "₹", "inr", "rupees", "rs.", "rs "
+    ]
+    for sig in india_signals:
+        if sig in text_lower:
+            return False, f"Static Reject: India-targeted content ('{sig}')"
+            
+    # If it passed all negative filters, we allow it to proceed to the LLM
+    return True, "Passed static pre-filter"
+
+
 async def qualify_lead(state: LeadDiscoveryState) -> LeadDiscoveryState:
     content = state.get("extracted_content", "")
     url_data = state.get("current_url_data", {})
     source = url_data.get("source", "unknown")
     title = url_data.get("title", "")
-    industry = state.get("industry", "Any")
-    icp = state.get("icp", "Any")
-    service = state.get("service", "Any")
+    campaign_name = state.get("campaign_name", "Unknown")
     
     if not content:
-        return {"is_qualified": False}
+        return {"is_qualified": False, "score": 0, "tier": "LOW", "qualification_breakdown": ["No content"]}
         
-    prompt = f"""You are a B2B Lead Qualification Engine. 
-The user is explicitly looking for leads in the following industry: {industry}
-Their Ideal Customer Profile (ICP) is: {icp}
-Target Service/Need: {service}
-
-Evaluate the following extracted web page/post content and determine if it is highly relevant to the user's target industry and ICP.
-If the post is a job listing or request from a COMPLETELY DIFFERENT industry (e.g. they want Tech but this is Healthcare/Real Estate), score it 0.
-If it matches the target industry and shows strong buying/hiring intent, score it 0-100.
-
-Content Title: {title}
-Content Source: {source}
-Extracted Content: {content[:3000]}
-
-Respond ONLY with valid JSON in the following format:
-{{
-    "score": <int 0-100>,
-    "reasoning": "<short 1 sentence explanation>"
-}}
-"""
-
-    score = 0
-    breakdown = []
+    # STAGE 1: Static Pre-Filter
+    passed, reason = static_pre_filter(content)
+    if not passed:
+        return {
+            "is_qualified": False,
+            "score": 0,
+            "tier": "LOW",
+            "qualification_breakdown": [f"0: {reason}"]
+        }
+        
+    # STAGE 2: Removed automated LLM Validation
+    # We now immediately save leads that passed the static filter as PENDING_AI 
+    # to avoid rate limits during mass discovery.
     
-    try:
-        from app.agents.intelligence import call_llm_with_fallback
-        import json
-        import re
-        messages = [{"role": "user", "content": "You return valid JSON.\n" + prompt}]
-        response_text = await call_llm_with_fallback(messages, temperature=0.0)
-        match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if match:
-            data = json.loads(match.group(0))
-            score = int(data.get("score", 0))
-            breakdown = [f"{score}: {data.get('reasoning', 'Qualified by LLM')}"]
-    except Exception as e:
-        logger.error(f"Dynamic LLM qualification failed: {e}")
-        # Fallback to the old score_post if LLM fails
-        from app.api.v1.leads import score_post, score_github_post
-        if source == "github":
-            score, breakdown = score_github_post(content, title)
-        else:
-            score, breakdown = score_post(content)
-
-    if score >= 85: tier = "HOT"
-    elif score >= 60: tier = "HIGH"
-    elif score >= 30: tier = "MEDIUM"
-    else: tier = "LOW"
-    
-    is_qualified = tier != "LOW"
+    score = 50
+    tier = "PENDING_AI"
+    breakdown = ["Passed static filter. Waiting for manual AI deep qualification."]
+    is_qualified = True
     
     return {
         "is_qualified": is_qualified,

@@ -14,30 +14,27 @@ const FONT_IMPORT =
 /* ---------------------------- constants ---------------------------- */
 
 const SOURCES = [
-  { id: "indiehackers", name: "Indie Hackers", tag: "IH" },
-  { id: "n8n", name: "n8n Community", tag: "N8N" },
+  { id: "yc", name: "Y Combinator", tag: "YC" },
+  { id: "freelancer", name: "Freelancer.com", tag: "FL" },
   { id: "hackernews", name: "Hacker News", tag: "HN" },
-  { id: "startup_networks", name: "Startup Networks", tag: "SN" },
-  { id: "uk_business_forums", name: "UK Business Forums", tag: "UKBF" },
+  { id: "indiehackers", name: "Indie Hackers", tag: "IH" },
+  { id: "peopleperhour", name: "PeoplePerHour", tag: "PPH" },
   { id: "bubble_forum", name: "Bubble Forum", tag: "BUB" },
-  { id: "remote_ok", name: "Remote OK", tag: "ROK" },
-  { id: "uk_contracts_finder", name: "UK Contracts Finder", tag: "UKCF" },
-  { id: "reddit", name: "Reddit", tag: "RDT" },
-  { id: "github", name: "GitHub", tag: "GH" },
-  { id: "mastodon", name: "Mastodon", tag: "MST" },
-  { id: "stackexchange", name: "StackExchange", tag: "SE" },
-  { id: "hn_algolia", name: "Hacker News (Algolia API)", tag: "HNA" },
-  { id: "weworkremotely", name: "We Work Remotely", tag: "WWR" },
-  { id: "discourse", name: "Discourse Communities", tag: "DIS" },
-  { id: "remotive", name: "Remotive", tag: "RMV" },
-  { id: "himalayas", name: "Himalayas", tag: "HIM" },
-  { id: "producthunt", name: "Product Hunt", tag: "PH" },
-  { id: "freelancer", name: "FreeLancer", tag: "FL" },
-  { id: "hn_freelance", name: "Hacker News (Freelance)", tag: "HNF" },
-  { id: "upwork", name: "Upwork", tag: "UW" },
-  { id: "peopleperhour", name: "PeoplePerHour", tag: "PPH" }
+  { id: "reddit", name: "Reddit", tag: "RDT" }
 ];
 const SOURCE_MAP = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
+SOURCE_MAP["Freelancer.com"] = SOURCE_MAP["freelancer"];
+SOURCE_MAP["freelancer.com"] = SOURCE_MAP["freelancer"];
+SOURCE_MAP["ycombinator"] = SOURCE_MAP["yc"];
+SOURCE_MAP["y_combinator"] = SOURCE_MAP["yc"];
+SOURCE_MAP["HackerNews"] = SOURCE_MAP["hackernews"];
+SOURCE_MAP["hacker_news"] = SOURCE_MAP["hackernews"];
+SOURCE_MAP["Indie Hackers"] = SOURCE_MAP["indiehackers"];
+SOURCE_MAP["indie_hackers"] = SOURCE_MAP["indiehackers"];
+SOURCE_MAP["PeoplePerHour"] = SOURCE_MAP["peopleperhour"];
+SOURCE_MAP["people_per_hour"] = SOURCE_MAP["peopleperhour"];
+SOURCE_MAP["Bubble Forum"] = SOURCE_MAP["bubble_forum"];
+SOURCE_MAP["Reddit"] = SOURCE_MAP["reddit"];
 
 const TECHNOLOGIES = [
   "RAG", "LLM", "AI Agents", "GenAI", "Automation", "Custom Software",
@@ -544,6 +541,13 @@ function SourceIcon({ id, size = 18 }) {
           <text x="12" y="15.5" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="8" fill="#fff">HNF</text>
         </svg>
       );
+    case "yc":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#FF6600" />
+          <text x="12" y="16" textAnchor="middle" fontFamily="var(--font-mono), monospace" fontWeight="700" fontSize="9" fill="#fff">YC</text>
+        </svg>
+      );
     default:
       return null;
   }
@@ -742,7 +746,8 @@ function LeadTable({ leads, onOpen, showStatus = true, dense = false, showContac
                   <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent-teal)", background: "#0E7C860F", border: "1px solid #0E7C8633", padding: "2px 7px", borderRadius: 3 }}>{l.technology}</span>
                 </td>
                 {!dense && <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 180 }}>{l.businessPain}</td>}
-                <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 220 }}>{(l.aiSummary && l.aiSummary !== "Unable to summarize." ? l.aiSummary : l.originalSnippet || "").slice(0, 92)}...</td>
+                <td style={{ padding: "10px 14px", color: "var(--ink-soft)", maxWidth: 220 }}>{(typeof (l.aiSummary && l.aiSummary !== "Unable to summarize." ? l.aiSummary : l.originalSnippet) === "string" ? (l.aiSummary && l.aiSummary !== "Unable to summarize." ? l.aiSummary : l.originalSnippet) : String(l.originalSnippet || "")).slice(0, 92)}...</td>
+
                 <td style={{ padding: "10px 14px", color: "var(--ink-soft)", whiteSpace: "nowrap", fontFamily: "var(--font-mono)", fontSize: 12 }}>{fmtDate(l.publishedDate)}</td>
               </tr>
             ))}
@@ -1247,10 +1252,13 @@ function LeadIntelPage({ lead, leads, nav }) {
 
   React.useEffect(() => {
     if (!lead) return;
-    if (lead.signalType !== "Unknown") {
+    // If we already have the detailed qualification data, use it directly
+    if (lead.signalType && lead.signalType !== "Unknown" && lead.requestedService) {
       setIntel(lead);
       return;
     }
+    
+    // Always call /analyze to fetch the details or the fast default payload!
     
     if (_analyzingLeads.has(lead.id)) {
       setAnalyzing(true);
@@ -1263,7 +1271,7 @@ function LeadIntelPage({ lead, leads, nav }) {
     fetch("http://localhost:8000/api/v1/leads/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: lead.company, content: lead.originalSnippet, author: lead.author, source: lead.source, url: lead.originalUrl })
+      body: JSON.stringify({ title: lead.company || "Unknown", content: lead.originalSnippet || "No content available", author: lead.author || "Unknown", source: lead.source || "Unknown", url: lead.originalUrl || "Unknown" })
     })
       .then(res => res.json())
       .then(data => {
@@ -1275,6 +1283,61 @@ function LeadIntelPage({ lead, leads, nav }) {
         setAnalyzing(false);
       });
   }, [lead]);
+
+  const [qualifying, setQualifying] = useState(false);
+  const handleDeepQualify = async () => {
+    setQualifying(true);
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/leads/deep-qualify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_id: lead.id })
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        // We mutate the lead object in place so the UI updates immediately.
+        // In a real Redux/Context app, we would dispatch an update.
+        const raw = data.raw_qualification || data.raw_llm_result || {};
+        lead.tierLabel = data.tier;
+        lead.intentScore = data.score;
+        lead.aiSummary = data.reason;
+        
+        // Map new strict qualification fields
+        lead.requestedService = raw.requested_service || "Unknown";
+        lead.requestedServiceCategory = raw.requested_service_category || "Unknown";
+        lead.serviceMatch = raw.service_match;
+        lead.intentType = raw.intent_type || "Unknown";
+        
+        // Map to existing UI fields as a fallback
+        lead.businessPain = raw.problem_detected || raw.requested_service_category || "Unknown";
+        lead.detectedNeed = raw.requested_service || "Unknown";
+        lead.buyingStage = raw.intent_type || "Unknown";
+        lead.recommendedAction = raw.service_match ? "Service matched. Reach out!" : "No service match.";
+        
+        // Trigger a re-render by creating a shallow copy for intel
+        setIntel({
+          ...lead,
+          signalType: raw.service_match ? "Qualified Opportunity" : "REJECTED",
+          businessPain: raw.problem_detected || raw.requested_service_category || "Unknown",
+          detectedNeed: raw.requested_service || "Unknown",
+          buyingStage: raw.intent_type || "Unknown",
+          recommendedAction: raw.service_match ? "Service matched. Reach out!" : "No service match.",
+          aiSummary: data.reason || raw.ai_summary || "No summary available",
+          requestedService: raw.requested_service || "Unknown",
+          requestedServiceCategory: raw.requested_service_category || "Unknown",
+          serviceMatch: raw.service_match
+        });
+
+      } else {
+        alert("Deep Qualification failed: " + data.message);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to connect to backend");
+    } finally {
+      setQualifying(false);
+    }
+  };
 
   const handleGenerateOutreach = async () => {
     if (!intel && !lead) return;
@@ -1343,6 +1406,28 @@ function LeadIntelPage({ lead, leads, nav }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 20, alignItems: "start" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {lead.tierLabel === "PENDING_AI" && (
+            <Panel title="Deep AI Qualification Required">
+              <div style={{ padding: "10px 0", textAlign: "center" }}>
+                <p style={{ fontSize: 13, color: "var(--ink-soft)", marginBottom: 16, marginTop: 0 }}>
+                  This lead passed the static filters. Trigger the AI to analyze the context, score the intent, and verify if they are a genuine buyer.
+                </p>
+                <button
+                  onClick={handleDeepQualify}
+                  disabled={qualifying}
+                  style={{
+                    background: qualifying ? "var(--line)" : "var(--accent-indigo)",
+                    color: "#fff", border: "none", padding: "10px 20px", borderRadius: 6,
+                    fontWeight: 600, cursor: qualifying ? "not-allowed" : "pointer",
+                    fontFamily: "var(--font-sans)"
+                  }}
+                >
+                  {qualifying ? "Running AI Analysis..." : "Deep Qualify with AI ✨"}
+                </button>
+              </div>
+            </Panel>
+          )}
+
           {(intel?.aiSummary || (lead.aiSummary && lead.aiSummary !== "Unable to summarize.")) && (
             <Panel title="AI Summary">
               <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--ink)", margin: 0 }}>{intel ? intel.aiSummary : lead.aiSummary}</p>
@@ -1364,34 +1449,95 @@ function LeadIntelPage({ lead, leads, nav }) {
 
 
 
+
           {analyzing && (
             <div style={{ padding: "40px 20px", textAlign: "center", border: "1px dashed var(--accent-teal)", borderRadius: 6, background: "#0E7C860C", color: "var(--accent-teal)" }}>
               <div style={{ fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 2s linear infinite" }}>
                   <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                 </svg>
-                Extracting Deep Intelligence...
+                Running AI Analysis...
               </div>
-              <div style={{ fontSize: 12.5, opacity: 0.8 }}>Running LangGraph Agentic workflow on {lead.source} post...</div>
+              <div style={{ fontSize: 12.5, opacity: 0.8 }}>Qualifying lead with AI — please wait a few seconds.</div>
             </div>
           )}
-          
-          <style>{`
-            @keyframes spin { 100% { transform: rotate(360deg); } }
-          `}</style>
-          
-          {intel && intel.signalType !== "Noise" && (
+
+          <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+
+          {intel && (
             <>
-    
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Panel title="Business Pain"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.businessPain}</p></Panel>
-                <Panel title="Detected Need"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.detectedNeed}</p></Panel>
-                
-                <Panel title="Buying Stage"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.buyingStage || "Unknown"}</p></Panel>
-                <Panel title="Recommended Action"><p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{intel.recommendedAction || "Reach out to discuss requirements."}</p></Panel>
+              {/* AI Summary */}
+              {intel.aiSummary && intel.aiSummary !== "Unknown" && intel.aiSummary !== "No summary available." && (
+                <Panel title="🧠 AI Analysis Summary">
+                  <p style={{ fontSize: 13.5, lineHeight: 1.7, color: "var(--ink)", margin: 0 }}>{intel.aiSummary}</p>
+                </Panel>
+              )}
+
+              {/* Signal Type + Match badges */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 4,
+                  background: intel.signalType === "Qualified Opportunity" ? "#0E7C8615" : "#ff000010",
+                  color: intel.signalType === "Qualified Opportunity" ? "var(--accent-teal)" : "#cc0000",
+                  border: `1px solid ${intel.signalType === "Qualified Opportunity" ? "#0E7C8633" : "#cc000033"}`
+                }}>{intel.signalType || "Unknown"}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 4,
+                  background: intel.serviceMatch ? "#0E7C8615" : "#ff000010",
+                  color: intel.serviceMatch ? "var(--accent-teal)" : "#cc0000",
+                  border: `1px solid ${intel.serviceMatch ? "#0E7C8633" : "#cc000033"}`
+                }}>{intel.serviceMatch ? "✓ Service Match" : "✗ No Service Match"}</span>
+                {intel.tierLabel && intel.tierLabel !== "ERROR" && (
+                  <span style={{ fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 4, background: "var(--chrome)", color: "var(--chrome-text)" }}>
+                    Tier: {intel.tierLabel}
+                  </span>
+                )}
               </div>
 
+              {/* 4-panel qualification grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Panel title="Business Pain / Problem">
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>
+                    {intel.businessPain && intel.businessPain !== "Unknown" ? intel.businessPain : "—"}
+                  </p>
+                </Panel>
+                <Panel title="Requested Service">
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>
+                    {intel.requestedService && intel.requestedService !== "Unknown" ? intel.requestedService : "—"}
+                  </p>
+                </Panel>
+                <Panel title="Service Category">
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>
+                    {intel.requestedServiceCategory && intel.requestedServiceCategory !== "Unknown" ? intel.requestedServiceCategory : "—"}
+                  </p>
+                </Panel>
+                <Panel title="Intent Type">
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>
+                    {intel.intentType && intel.intentType !== "Unknown" ? intel.intentType : intel.buyingStage && intel.buyingStage !== "Unknown" ? intel.buyingStage : "—"}
+                  </p>
+                </Panel>
+              </div>
+
+              {/* Recommended Action */}
+              {intel.recommendedAction && intel.recommendedAction !== "Unknown" && (
+                <Panel title="Recommended Action">
+                  <p style={{ margin: 0, fontSize: 13.5, fontWeight: 600, lineHeight: 1.55,
+                    color: intel.serviceMatch ? "var(--accent-teal)" : "var(--ink-soft)"
+                  }}>{intel.recommendedAction}</p>
+                </Panel>
+              )}
+
+              {/* Evidence list */}
+              {intel.evidence && intel.evidence.filter(e => e && !e.includes("undefined") && !e.includes("null")).length > 0 && (
+                <Panel title="Evidence">
+                  <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {intel.evidence.filter(e => e && !e.includes("undefined") && !e.includes("null")).map((e, i) => (
+                      <li key={i} style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>{e}</li>
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+
               <Panel title="Contact & Profiles">
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <ProfileLink label="Source Profile" value={intel.sourceProfileUrl} />
                   <ProfileLink label="Company Website" value={intel.companyWebsite} />
@@ -1524,26 +1670,6 @@ function LeadIntelPage({ lead, leads, nav }) {
             <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15.5, color: "var(--ink)", marginBottom: 4 }}>{activeService}</div>
             <div style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Mapped from detected technology and business pain.</div>
           </Panel>
-
-          {related.length > 0 && (
-            <Panel title={`Cross-Source Timeline (${related.length + 1} signals)`}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, borderLeft: "2px solid var(--line)", paddingLeft: 12, marginLeft: 6 }}>
-                {[lead, ...related].sort((a,b) => new Date(b.publishedDate) - new Date(a.publishedDate)).map((r) => (
-                  <div key={r.id} onClick={() => nav.openLead(r.id)} style={{ position: "relative", padding: "10px", border: "1px solid var(--line)", borderRadius: 5, cursor: "pointer", background: r.id === lead.id ? "var(--chrome)" : "var(--surface)", color: r.id === lead.id ? "#fff" : "var(--ink)" }}>
-                    <div style={{ position: "absolute", left: -19, top: 16, width: 10, height: 10, borderRadius: 5, background: r.id === lead.id ? "var(--accent-teal)" : "var(--line)" }} />
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <SourceTag id={r.source} />
-                        <span style={{ fontSize: 12, opacity: 0.8 }}>{fmtDate(r.publishedDate)}</span>
-                      </div>
-                      <IntentCell score={r.intentScore} breakdown={r.scoreBreakdown} />
-                    </div>
-                    <div style={{ fontSize: 12.5 }}>{r.signalType}</div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-          )}
         </div>
       </div>
     </div>
@@ -1552,16 +1678,26 @@ function LeadIntelPage({ lead, leads, nav }) {
 
 function TruncatedText({ text, max }) {
   const [expanded, setExpanded] = useState(false);
-  if (!text || text.length <= max) return <>{text}</>;
+  let str = "";
+  if (typeof text === "string") {
+    str = text;
+  } else if (text && typeof text === "object") {
+    str = text.text || text.description || JSON.stringify(text);
+  } else if (text !== null && text !== undefined) {
+    str = String(text);
+  }
+
+  if (!str || str.length <= max) return <>{str}</>;
   return (
     <>
-      {expanded ? text : `${text.slice(0, max)}... `}
+      {expanded ? str : `${str.slice(0, max)}... `}
       <button onClick={() => setExpanded(!expanded)} style={{ background: "none", border: "none", color: "var(--accent-teal)", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: "inherit", marginLeft: 4 }}>
         {expanded ? "Read less" : "Read more"}
       </button>
     </>
   );
 }
+
 
 function Panel({ title, children }) {
   return (
@@ -1858,7 +1994,8 @@ function AiSearchPage({ leads, nav }) {
                                 </div>
                                 <div style={{ fontWeight: 700, color: r.intentScore >= 80 ? "var(--accent-teal)" : "inherit" }}>{r.intentScore}</div>
                               </div>
-                              <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{r.aiSummary || r.originalSnippet.slice(0,100)+"..."}</div>
+                              <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{r.aiSummary || (typeof r.originalSnippet === "string" ? r.originalSnippet.slice(0,100)+"..." : String(r.originalSnippet || "").slice(0,100)+"...")}</div>
+
                             </div>
                           ))}
                           {m.results.length > 10 && <div style={{ fontSize: 12, color: "var(--ink-soft)", textAlign: "center", padding: "10px 0" }}>+ {m.results.length - 10} more (view in Leads table for full list)</div>}
@@ -1902,6 +2039,7 @@ function AiSearchPage({ leads, nav }) {
 
 const NAV_ITEMS = [
   { id: "ai_search", label: "AI Search" },
+  { id: "campaigns", label: "Campaigns" },
   { id: "overview", label: "Overview" },
   { id: "leads", label: "Leads" },
   { id: "sources", label: "Source Intelligence" },
@@ -1912,17 +2050,129 @@ function emptyFilters() {
   return { search: "", source: "", industry: "", country: "", technology: "", signalType: "", tierLevel: "HOT", sort: "intent" };
 }
 
+
+/* ---------------------------- Campaigns Page ---------------------------- */
+
+function CampaignsPage({ nav }) {
+  const [campaigns, setCampaigns] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [newCampaign, setNewCampaign] = React.useState({ name: "", service_description: "", target_industry: "", target_geography: "" });
+  
+  React.useEffect(() => {
+    fetchCampaigns();
+  }, []);
+
+  async function fetchCampaigns() {
+    setLoading(true);
+    try {
+      const res = await axios.get("http://localhost:8000/api/v1/campaigns");
+      setCampaigns(res.data.campaigns || []);
+    } catch(e) {
+      console.error(e);
+    }
+    setLoading(false);
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    try {
+      await axios.post("http://localhost:8000/api/v1/campaigns", newCampaign);
+      setNewCampaign({ name: "", service_description: "", target_industry: "", target_geography: "" });
+      fetchCampaigns();
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  async function handleRun(campaign_id) {
+    try {
+      await axios.post(`http://localhost:8000/api/v1/campaigns/${campaign_id}/discover`);
+      alert("Discovery job queued!");
+    } catch(e) {
+      console.error(e);
+      alert("Failed to queue discovery job");
+    }
+  }
+
+  async function handleRunAll() {
+    try {
+      await axios.post(`http://localhost:8000/api/v1/campaigns/discover-all`);
+      alert("Discovery jobs queued for all campaigns! They will run sequentially in the background.");
+    } catch(e) {
+      console.error(e);
+      alert("Failed to queue discovery jobs.");
+    }
+  }
+
+  if (loading) return <div>Loading campaigns...</div>;
+
+  return (
+    <div style={{ maxWidth: 800 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <h2 style={{ fontFamily: "var(--font-display)", margin: 0 }}>Campaigns</h2>
+        <button onClick={handleRunAll} style={{ background: "var(--accent-teal)", color: "#fff", padding: "10px 16px", borderRadius: 4, border: "none", cursor: "pointer", fontWeight: 600, boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
+          Run All Campaigns
+        </button>
+      </div>
+      
+      <div style={{ background: "var(--surface)", padding: 24, borderRadius: 8, marginBottom: 32, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+        <h3 style={{ marginTop: 0, marginBottom: 16 }}>Create New Campaign</h3>
+        <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <input placeholder="Campaign Name (e.g. Q4 Marketing Agencies)" value={newCampaign.name} onChange={e => setNewCampaign({...newCampaign, name: e.target.value})} required style={{ padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 4 }} />
+          <textarea placeholder="Service Description (What do you sell?)" value={newCampaign.service_description} onChange={e => setNewCampaign({...newCampaign, service_description: e.target.value})} required style={{ padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 4, minHeight: 80 }} />
+          <input placeholder="Target Industry (e.g. Marketing, SaaS, Healthcare)" value={newCampaign.target_industry} onChange={e => setNewCampaign({...newCampaign, target_industry: e.target.value})} style={{ padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 4 }} />
+          <input placeholder="Target Geography (e.g. US, UK, Global)" value={newCampaign.target_geography} onChange={e => setNewCampaign({...newCampaign, target_geography: e.target.value})} style={{ padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 4 }} />
+          <button type="submit" style={{ background: "var(--chrome)", color: "#fff", padding: "10px", borderRadius: 4, border: "none", cursor: "pointer", fontWeight: 600 }}>Create Campaign</button>
+        </form>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {campaigns.map(c => (
+          <div key={c.id} style={{ background: "var(--surface)", padding: 20, borderRadius: 8, border: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h3 style={{ margin: "0 0 8px 0" }}>{c.name}</h3>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--ink-soft)" }}>{c.service_description.substring(0, 100)}...</p>
+            </div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button onClick={() => handleRun(c.id)} style={{ background: "var(--accent-teal)", color: "#fff", padding: "8px 16px", borderRadius: 4, border: "none", cursor: "pointer", fontWeight: 500 }}>Run Discovery</button>
+            </div>
+          </div>
+        ))}
+        {campaigns.length === 0 && <div style={{ color: "var(--ink-soft)", fontSize: 14 }}>No campaigns found. Create one above.</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+
   const [rawLeads, setLeads] = useState([]);
   const [backendStats, setBackendStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Dynamically normalize source IDs during render so it instantly applies via HMR without needing a refresh
   const leads = useMemo(() => {
-    return rawLeads.map(l => ({
-      ...l,
-      source: l.source === "n8n_community" ? "n8n" : (l.source === "indie_hackers" ? "indiehackers" : l.source)
-    }));
+    return rawLeads.map(l => {
+      let src = l.source || "Unknown";
+      let lower = src.toLowerCase();
+      let normalized = lower;
+      
+      if (lower === "reddit") normalized = "reddit";
+      else if (lower === "indie hackers" || lower === "indie_hackers") normalized = "indiehackers";
+      else if (lower === "remote ok") normalized = "remote_ok";
+      else if (lower === "hackernews" || lower === "hacker news") normalized = "hackernews";
+      else if (lower === "upwork") normalized = "upwork";
+      else if (lower === "peopleperhour") normalized = "peopleperhour";
+      else if (lower === "freelancer" || lower === "freelancer.com") normalized = "freelancer";
+      else if (lower === "n8n_community") normalized = "n8n";
+      else if (lower === "searxng") normalized = "searxng";
+      else if (lower === "yc" || lower.includes("y combinator") || lower.includes("ycombinator")) normalized = "yc";
+      
+      return {
+        ...l,
+        source: normalized
+      };
+    });
   }, [rawLeads]);
 
   useEffect(() => {
@@ -1947,7 +2197,7 @@ export default function App() {
   const [page, setPage] = useState("overview");
   const [prevPage, setPrevPage] = useState("overview");
   const [filters, setFilters] = useState(emptyFilters());
-  const [activeSource, setActiveSource] = useState("indiehackers");
+  const [activeSource, setActiveSource] = useState("yc");
   const [selectedLeadId, setSelectedLeadId] = useState(null);
 
   const nav = {
@@ -2017,13 +2267,14 @@ export default function App() {
         </div>
         <div style={{ marginTop: "auto", padding: "16px 20px", borderTop: "1px solid var(--chrome-line)", fontSize: 11, color: "#7C8898" }}>
           <div style={{ fontFamily: "var(--font-mono)" }}>{leads.length} signals tracked</div>
-          <div style={{ fontFamily: "var(--font-mono)", marginTop: 2 }}>9 active sources</div>
+          <div style={{ fontFamily: "var(--font-mono)", marginTop: 2 }}>{SOURCES.length} active sources</div>
         </div>
       </div>
 
       {/* Main */}
       <div style={{ flex: 1, padding: "26px 32px", minWidth: 0 }}>
         {page === "ai_search" && <AiSearchPage leads={leads} nav={nav} />}
+        {page === "campaigns" && <CampaignsPage nav={nav} />}
         {page === "overview" && <OverviewPage leads={leads} nav={nav} backendStats={backendStats} />}
         {page === "leads" && <LeadsPage leads={leads} filters={filters} setFilters={setFilters} nav={nav} setLeads={setLeads} />}
         {page === "sources" && <SourceIntelPage leads={leads} activeSource={activeSource} setActiveSource={setActiveSource} nav={nav} />}

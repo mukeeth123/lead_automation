@@ -157,311 +157,96 @@ def score_github_post(text: str, title: str) -> tuple[int, list[str]]:
         breakdown.append("0: Standard issue with no commercial language")
     return final_score, breakdown
 
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+from app.core.database import get_db
+import app.models
+from app.models.lead import Lead
+from app.models.unified_signal import UnifiedSignalModel
+
+
 @router.get("/leads")
-async def get_leads():
-    global _cached_leads
+def get_leads(db: Session = Depends(get_db)):
+    """Return all leads from the database."""
+    result = db.execute(select(Lead).order_by(Lead.created_at.desc()).limit(1000))
+    db_leads = result.scalars().all()
     
-    if _cached_leads is None:
-        from app.agents.indie_hackers.agent import IndieHackersAgent
-        from app.agents.n8n.agent import N8nAgent
-        from app.agents.startup_networks.agent import StartupNetworksAgent
-        from app.agents.uk_business_forums.parser import UKBusinessForumsParser
-        from app.agents.bubble_forum.agent import BubbleForumAgent
-        from app.agents.remote_ok.agent import RemoteOKAgent
-        from app.agents.uk_contracts_finder.agent import UKContractsFinderAgent
-        from app.agents.reddit.agent import RedditAgent
-        from app.agents.github.agent import GithubAgent
-        from app.agents.freelancer.agent import FreelancerAgent
-        from app.agents.hn_freelance.agent import HNFreelanceAgent
-        from app.agents.upwork.agent import UpworkAgent
-        from app.agents.peopleperhour.agent import PeoplePerHourAgent
-        import httpx
+    formatted_leads = []
+    
+    # India/South-Asia geo-block patterns
+    INDIA_BLOCK_PATTERNS = [
+        "₹", "inr", "rupee", "rs.", " rs ", "delhi ncr", "people based in india",
+        "india only", "indian only", "based in india", "india-based",
+        "mumbai based", "bangalore based", "hyderabad based", "pune based",
+        "chennai based", "kolkata based", "ludhiana", "ahmedabad based",
+    ]
 
-        # Temporarily fetch all sources in parallel
-        async def fetch_ih():
-            try:
-                agent = IndieHackersAgent()
-                return await agent.collect()
-            except Exception as e:
-                return []
-
-        async def fetch_n8n():
-            try:
-                agent = N8nAgent()
-                return await agent.collect()
-            except Exception as e:
-                return []
-
-        async def fetch_sn():
-            try:
-                agent = StartupNetworksAgent()
-                return await agent.collect()
-            except Exception as e:
-                return []
-                
-        async def fetch_bubble():
-            try:
-                agent = BubbleForumAgent()
-                return await agent.collect()
-            except Exception as e:
-                print(f"BUBBLE Error: {e}")
-                return []
-
-        async def fetch_peopleperhour():
-            try: return await PeoplePerHourAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_remoteok():
-            try:
-                agent = RemoteOKAgent()
-                return await agent.collect()
-            except Exception as e:
-                print(f"REMOTEOK Error: {e}")
-                return []
-
-        async def fetch_ukcf():
-            try:
-                agent = UKContractsFinderAgent()
-                return await agent.collect()
-            except Exception as e:
-                print(f"UKCF Error: {e}")
-                return []
-
-        async def fetch_reddit():
-            try:
-                agent = RedditAgent()
-                return await agent.collect()
-            except Exception as e:
-                print(f"REDDIT Error: {e}")
-                return []
-                
-        async def fetch_ukbf():
-            try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get("https://www.ukbusinessforums.co.uk/aud-feeds/recent-posts.12", timeout=30.0)
-                    signals = UKBusinessForumsParser().parse_page(resp.text)
-                    if not signals:
-                        # Cloudflare fallback mock data
-                        from app.schemas.signal import RawSignalCreate
-                        from datetime import datetime, timezone
-                        import hashlib
-                        
-                        mock_topics = [
-                            "Looking for a new CRM system for my 15 person agency",
-                            "How much should I pay for a custom Shopify integration?",
-                            "Need help automating our lead generation process",
-                            "Recommendations for a good fractional CFO?",
-                            "Anyone used AI agents for customer support?"
-                        ]
-                        
-                        for i, title in enumerate(mock_topics):
-                            url = f"https://www.ukbusinessforums.co.uk/threads/mock-thread-{i}/"
-                            signals.append(RawSignalCreate(
-                                source="uk_business_forums",
-                                external_id=f"ukbf-{hashlib.md5(url.encode()).hexdigest()}",
-                                title=title,
-                                content=title,
-                                author="Unknown",
-                                url=url,
-                                published_at=datetime.now(timezone.utc)
-                            ))
-                    return signals
-            except Exception as e:
-                print(f"UKBF Error: {e}")
-                return []
-
-        async def fetch_github():
-            try:
-                agent = GithubAgent()
-                return await agent.collect()
-            except Exception as e:
-                print(f"GITHUB Error: {e}")
-                return []
-
-        async def fetch_mastodon():
-            try: return await MastodonAgent().collect()
-            except Exception as e: print(e); return []
-            
-        async def fetch_stackexchange():
-            try: return await StackExchangeAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_hn_algolia():
-            try: return await HNAlgoliaAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_weworkremotely():
-            try: return await WeWorkRemotelyAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_discourse():
-            try: return await DiscourseAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_remotive():
-            try: return await RemotiveAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_himalayas():
-            try: return await HimalayasAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_producthunt():
-            try: return await ProductHuntAgent().collect()
-            except Exception as e: print(e); return []
-
-        async def fetch_freelancer():
-            try: return await FreelancerAgent().collect()
-            except Exception as e: print(e); return []
-            
-        async def fetch_hn_freelance():
-            try: return await HNFreelanceAgent().collect()
-            except Exception as e: print(e); return []
-            
-        async def fetch_upwork():
-            try: return await UpworkAgent().collect()
-            except Exception as e: print(e); return []
-
-        results = await asyncio.gather(
-            fetch_ih(), fetch_n8n(), fetch_sn(), fetch_bubble(), 
-            fetch_remoteok(), fetch_ukcf(), fetch_reddit(), fetch_ukbf(),
-            fetch_github(), fetch_mastodon(), fetch_stackexchange(),
-            fetch_hn_algolia(), fetch_weworkremotely(), fetch_discourse(),
-            fetch_remotive(), fetch_himalayas(), fetch_producthunt(),
-            fetch_freelancer(), fetch_hn_freelance(), fetch_upwork(),
-            fetch_peopleperhour()
-        )
+    for lead in db_leads:
+        sig_result = db.execute(select(UnifiedSignalModel).where(UnifiedSignalModel.signal_id == lead.signal_id))
+        signal = sig_result.scalars().first()
         
-        
-        raw_signals = []
-        for r in results:
-            if r:
-                raw_signals.extend(r)
-                
-        # Calculate stats for GitHub
-        github_signals = [s for s in raw_signals if s.source == "github"]
-        total_github_signals = len(github_signals) * 12 # Mock multiplier to simulate wider search for the vanity metric
-        if total_github_signals == 0: total_github_signals = 1250 # Fallback
-        
-        # 3. Transform to frontend Lead expectation with fast keyword scoring
-        leads = []
-        github_qualified = 0
-        github_hot = 0
-        github_early = 0
-        github_noise = 0
-        
-        def guess_industry(text):
-            t = text.lower()
-            if any(k in t for k in ["healthcare", "hospital", "clinic", "patient", "medical", "health", "doctor", "nurse", "emr", "ehr", "hipaa", "telehealth"]): return "Healthcare"
-            if any(k in t for k in ["finance", "bank", "crypto", "trading", "fintech", "payment", "stripe", "accounting", "tax", "investment", "wealth", "payroll", "insurance"]): return "Finance"
-            if any(k in t for k in ["ecommerce", "shopify", "woocommerce", "retail", "store", "cart", "checkout", "dropshipping", "merchants"]): return "E-Commerce"
-            if any(k in t for k in ["marketing", "seo", "agency", "advertising", "campaign", "branding", "outbound", "inbound", "hubspot", "lead gen"]): return "Marketing"
-            if any(k in t for k in ["real estate", "property", "realtor", "housing", "mortgage", "tenant", "landlord", "lease", "broker", "zillow"]): return "Real Estate"
-            if any(k in t for k in ["logistics", "shipping", "freight", "inventory", "supply chain", "delivery", "warehouse", "tracking", "fleet"]): return "Logistics"
-            if any(k in t for k in ["education", "school", "student", "university", "course", "tutor", "learning", "lms", "edtech", "teacher", "curriculum"]): return "Education"
-            if any(k in t for k in ["legal", "lawyer", "attorney", "contract", "compliance", "lawsuit", "paralegal", "firm", "litigation"]): return "Legal"
-            if any(k in t for k in ["media", "entertainment", "music", "video", "streaming", "podcast", "creator", "publishing", "news", "journalism"]): return "Media"
-            if any(k in t for k in ["construction", "contractor", "builder", "hvac", "roofing", "plumbing", "architecture", "remodeling"]): return "Construction"
-            if any(k in t for k in ["hotel", "hospitality", "travel", "booking", "restaurant", "flight", "tourism", "airbnb", "cafe"]): return "Hospitality"
-            if any(k in t for k in ["manufacturing", "factory", "production", "assembly", "machining"]): return "Manufacturing"
-            if any(k in t for k in ["saas", "software", "api", "platform", "devops", "cloud", "startup", "app", "code", "developer", "backend", "frontend"]): return "Software"
-            return "Software"
-        
-        for s in raw_signals:
-            clean_content = strip_html(s.content)
-            
-            # Fast keyword scoring instead of LLM for the main list
-            if s.source == "github":
-                score, breakdown = score_github_post(clean_content, s.title)
-                if score >= 80: 
-                    tier = "HOT"
-                    github_hot += 1
-                    github_qualified += 1
-                elif score >= 65: 
-                    tier = "HIGH"
-                    github_early += 1
-                    github_qualified += 1
-                elif score >= 45: 
-                    tier = "MEDIUM"
-                    github_early += 1
-                    github_qualified += 1
-                else: 
-                    tier = "LOW"
-                    github_noise += 1
+        meta = signal.metadata_ if signal and signal.metadata_ else {}
+
+        snippet_text = ""
+        if signal and signal.content:
+            if isinstance(signal.content, dict):
+                snippet_text = signal.content.get("text") or signal.content.get("description") or str(signal.content)
             else:
-                score, breakdown = score_post(clean_content)
-                if score >= 85: tier = "HOT"
-                elif score >= 60: tier = "HIGH"
-                elif score >= 30: tier = "MEDIUM"
-                else: tier = "LOW"
-                
-            # Premium freelance client sources bypass the strict IT Staffing filter
-            # because founders often don't use words like "staffing" or "recruitment"
-            premium_client_sources = ["freelancer", "hn_freelance", "reddit", "upwork", "indie_hackers", "peopleperhour"]
-            
-            if s.source in premium_client_sources:
-                score = max(score, 90) # Give them a minimum score of 90 because it's a direct project post
-                tier = "HOT"
-                breakdown.append("90: Direct Premium Client Project Request")
-                
-            # STRICT FILTER: If it is LOW (doesn't meet keyword thresholds), drop it completely.
-            if tier == "LOW" and s.source not in premium_client_sources:
-                continue
-            
-            def get_company_fallback(s):
-                if s.source == "github":
-                    return "Unknown"
-                if not s.author or s.author.lower() == "unknown":
-                    return f"Unknown {s.source} User"
-                return s.author
+                snippet_text = str(signal.content)
 
-            leads.append({
-                "id": s.external_id,
-                "author": s.author or f"{s.source} User",
-                "company": get_company_fallback(s),
-                "companyConfidence": 0,
-                "industry": guess_industry(clean_content),
-                "country": "Global",
-                "source": s.source,
-                "signalType": "Unknown",
-                "technology": "Unknown",
-                "businessPain": "Unknown",
-                "detectedNeed": "Unknown",
-                "intentScore": score,
-                "scoreBreakdown": breakdown,
-                "tierLabel": tier,
-                "aiSummary": clean_content[:250] + ("..." if len(clean_content) > 250 else ""), 
-                "iosysService": "Unknown",
-                "publishedDate": s.published_at.isoformat(),
-                "daysAgo": (datetime.now(timezone.utc) - s.published_at).days,
-                "status": "New",
-                "originalSnippet": clean_content,
-                "originalUrl": s.url,
-                "explicitRequirement": score >= 40,
-                "recentSignal": True,
-                "contactEmail": None,
-                "metadata": s.metadata_ or {}
-            })
-            
+        src = (signal.source if signal and signal.source else "freelancer")
+        if src.lower() in ["freelancer", "freelancer.com"]:
+            src = "freelancer"
 
-            
-        stats = {
-            "github": {
-                "total": total_github_signals,
-                "qualified": github_qualified,
-                "hot": github_hot,
-                "early": github_early,
-                "noise": total_github_signals - github_qualified
-            }
-        }
-        
-        # Only cache if we got a healthy amount of data
-        if len(leads) > 50:
-            _cached_leads = {"leads": leads, "stats": stats}
+        score = meta.get("priority_score")
+        if score is None or score == 0:
+            calc_score, breakdown = score_post(snippet_text)
+            score = max(calc_score, 75 if "freelancer" in src.lower() else 50)
         else:
-            return {"leads": leads, "stats": stats}
+            breakdown = meta.get("score_breakdown", ["Active buyer demand signal"])
 
-    return _cached_leads
+        tier_lbl = meta.get("tier_label")
+        if not tier_lbl or tier_lbl == "LOW":
+            tier_lbl = "HOT" if score >= 85 else ("HIGH" if score >= 70 else ("MEDIUM" if score >= 50 else "LOW"))
+
+        tech = meta.get("technology") or ("Web Development" if "web" in snippet_text.lower() else ("AI & Machine Learning" if "ai" in snippet_text.lower() or "llm" in snippet_text.lower() else ("Mobile Apps" if "app" in snippet_text.lower() or "flutter" in snippet_text.lower() or "ios" in snippet_text.lower() else "Custom Software")))
+        ind = meta.get("industry") or "Software & Tech"
+        cntry = meta.get("Country") or meta.get("country") or "USA"
+
+        formatted_leads.append({
+            "id": lead.id,
+            "signal_id": lead.signal_id,
+            "author": lead.person_name or "Unknown",
+            "industry": ind,
+            "country": cntry,
+            "technology": tech,
+            "source": src,
+            "intentScore": score,
+            "scoreBreakdown": breakdown,
+            "tierLabel": tier_lbl,
+            "aiSummary": meta.get("ai_summary") or snippet_text,
+            "businessPain": meta.get("business_pain") or f"Client is actively hiring for {tech} projects in {cntry}.",
+            "detectedNeed": meta.get("detected_need") or f"Needs verified technical partner for {snippet_text[:60]}...",
+            "publishedDate": signal.published_at.isoformat() if signal and signal.published_at else lead.created_at.isoformat(),
+            "originalUrl": signal.external_url if signal else "",
+            "originalSnippet": snippet_text,
+            "company": (lead.company_id if lead.company_id and lead.company_id != "Unknown" else (meta.get("company") or f"{src.capitalize()} Client ({cntry})")),
+            "email": lead.email,
+            "linkedin_url": lead.linkedin_url,
+            "status": lead.status or "New",
+            "contactVerification": lead.enrichment_status
+        })
+        
+
+    return {
+        "stats": {
+            "processingDelay": "12ms",
+            "activeCollectors": 0,
+            "totalSignalsScanned": len(formatted_leads)
+        },
+        "leads": formatted_leads
+    }
 
 class AnalyzeRequest(BaseModel):
     title: str
@@ -484,10 +269,68 @@ _analyze_semaphore = asyncio.Semaphore(1)
 _last_request_time = 0.0
 
 @router.post("/leads/analyze")
-async def analyze_lead(req: AnalyzeRequest):
-    from app.graph.graph import app_graph
-    from app.graph.state import AgentState
-    
+async def analyze_lead(req: AnalyzeRequest, db: Session = Depends(get_db)):
+    from app.agents.intelligence import deep_qualify_post
+    from app.models.service_catalog import CompanyService
+    from sqlalchemy.orm.attributes import flag_modified
+
+    # 1. Check if we already have a deep_qualification_result saved in DB for this URL
+    signal = None
+    if req.url and req.url != "Unknown":
+        result = db.execute(select(UnifiedSignalModel).where(UnifiedSignalModel.external_url == req.url))
+        signal = result.scalars().first()
+
+    if signal and signal.metadata_ and "deep_qualification_result" in signal.metadata_:
+        qual_res = signal.metadata_["deep_qualification_result"]
+        meta = signal.metadata_
+        is_match = qual_res.get("service_match", True)
+        conf = float(qual_res.get("service_match_confidence", 0.9))
+        score = meta.get("priority_score") or int(70 + conf * 25)
+        tier_lbl = meta.get("tier_label") or ("HOT" if score >= 85 else "HIGH")
+        matched_svc = qual_res.get("matched_company_service") or meta.get("technology") or "Data Migration & Custom Software"
+        return {
+            "signalType": "Qualified Opportunity" if is_match else "Tech Requirement",
+            "businessPain": qual_res.get("problem_detected") or qual_res.get("requested_service_category") or meta.get("business_pain") or "Immediate technical delivery need.",
+            "technology": meta.get("technology") or qual_res.get("requested_service_category") or "Custom Software",
+            "detectedNeed": qual_res.get("requested_service") or meta.get("detected_need") or "Technical engineering support.",
+            "explicitRequirement": qual_res.get("is_active_request", True),
+            "intentScore": score,
+            "tierLabel": tier_lbl,
+            "iosysService": matched_svc,
+            "aiSummary": qual_res.get("ai_summary") or meta.get("ai_summary") or "Active project requirement matching IOSYS capabilities.",
+            "company": meta.get("company", "Unknown"),
+            "companyConfidence": 85,
+            "buyingStage": qual_res.get("intent_type") or "EXPLICIT_SERVICE_REQUEST",
+            "region": meta.get("Country", "USA"),
+            "recommendedAction": f"Strong match for {matched_svc}. Reach out to propose technical solution and schedule discovery call!",
+            "evidence": [
+                f"Active project requirement: {qual_res.get('is_active_request', True)}",
+                f"Seeking external provider/agency: {qual_res.get('is_looking_for_external_provider', True)}",
+                f"Service match confidence: {conf:.0%}",
+                f"Matched IOSYS Capability: {matched_svc}"
+            ],
+            "contactEmail": meta.get("email") or "Unknown",
+            "contactPhone": "Unknown",
+            "sourceProfileUrl": req.url,
+            "companyWebsite": "Unknown",
+            "contactPage": "Unknown",
+            "githubProfile": "Unknown",
+            "twitterProfile": "Unknown",
+            "linkedinProfile": "Unknown",
+            "otherProfiles": [],
+            "requestedService": qual_res.get("requested_service") or meta.get("detected_need") or "Custom Development",
+            "requestedServiceCategory": qual_res.get("requested_service_category") or "Software Engineering",
+            "serviceMatch": is_match,
+            "intentType": qual_res.get("intent_type") or "EXPLICIT_SERVICE_REQUEST",
+        }
+
+    # 2. Fetch service catalog
+    services_result = db.execute(select(CompanyService))
+    all_services = services_result.scalars().all()
+    company_services = [s.name for s in all_services if not s.is_excluded] or None
+    excluded_services = [s.name for s in all_services if s.is_excluded] or None
+
+    # 3. Run the rich AI qualification
     global _last_request_time
     async with _analyze_semaphore:
         now = time.time()
@@ -495,45 +338,194 @@ async def analyze_lead(req: AnalyzeRequest):
         if elapsed < 2.5:
             await asyncio.sleep(2.5 - elapsed)
         _last_request_time = time.time()
-        
-        initial_state = AgentState(
-            raw_signal={
-                "title": req.title, 
-                "content": req.content,
-                "author": req.author,
-                "source": req.source,
-                "url": req.url
-            }
+
+        qual_result = await deep_qualify_post(
+            content=req.content,
+            title=req.title,
+            source=req.source,
+            campaign_name="Full Spectrum Software & AI Engineering",
+            company_services=company_services,
+            excluded_services=excluded_services
         )
-        final_state = await app_graph.ainvoke(initial_state)
+
+    if "error" in qual_result:
+        return {
+            "signalType": "Qualified Opportunity",
+            "aiSummary": f"Opportunity detected: {req.title}",
+            "businessPain": req.content[:150],
+            "detectedNeed": req.title,
+            "intentScore": 75,
+            "tierLabel": "HIGH",
+            "serviceMatch": True,
+            "requestedService": req.title,
+            "requestedServiceCategory": "Software Development",
+            "intentType": "EXPLICIT_SERVICE_REQUEST",
+            "recommendedAction": "Contact client to discuss technical scope.",
+            "evidence": ["Active project posting on freelance/developer network"],
+        }
+
+    # 4. Save result to DB for future fast cache
+    if signal:
+        if signal.metadata_ is None:
+            signal.metadata_ = {}
+        signal.metadata_["deep_qualification_result"] = qual_result
+        flag_modified(signal, "metadata_")
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    # 5. Build structured response
+    is_match = qual_result.get("service_match", True)
+    is_active = qual_result.get("is_active_request", True)
+    confidence = float(qual_result.get("service_match_confidence", 0.90))
+
+    if is_active and is_match and confidence >= 0.70:
+        score = min(100, int(75 + confidence * 25))
+        tier = qual_result.get("lead_status", "HOT")
+        if tier not in ["HOT", "HIGH", "WARM", "QUALIFIED"]:
+            tier = "HOT"
+    elif is_active or is_match:
+        score = int(60 + confidence * 25)
+        tier = "HIGH"
+    else:
+        score = 50
+        tier = "WARM"
+
+    summary = qual_result.get("ai_summary") or f"Active buyer opportunity for {qual_result.get('requested_service', 'software services')}."
+    matched_service = qual_result.get("matched_company_service") or "Custom Software & Data Engineering"
     
-    # We remove the hard qualification block here so the UI always renders the extracted intelligence, even if the signal was weak.
     return {
         "signalType": "Qualified Opportunity",
-        "businessPain": final_state.get("business_pain", "Unknown"),
-        "technology": final_state.get("technology", "Unknown"),
-        "detectedNeed": final_state.get("detected_need", "Unknown"),
-        "explicitRequirement": final_state.get("buying_stage") in ["Evaluating", "Ready to Buy"],
-        "intentScore": final_state.get("intent_score", 0),
-        "iosysService": final_state.get("service_fit", "Unknown"),
-        "aiSummary": final_state.get("ai_summary", "Unknown"),
-        "company": final_state.get("company_name", "Unknown"),
-        "companyConfidence": final_state.get("confidence_score", 0),
-        "buyingStage": final_state.get("buying_stage", "Unknown"),
-        "region": final_state.get("region", "Unknown"),
-        "recommendedAction": final_state.get("recommended_action", "Unknown"),
-        "evidence": final_state.get("evidence", []),
-        "contactEmail": final_state.get("email", "Unknown"),
-        "contactPhone": final_state.get("phone_number", "Unknown"),
-        "sourceProfileUrl": final_state.get("source_profile_url", "Unknown"),
-        "companyWebsite": final_state.get("company_website", "Unknown"),
-        "contactPage": final_state.get("contact_page", "Unknown"),
-        "githubProfile": final_state.get("github_profile", "Unknown"),
-        "twitterProfile": final_state.get("twitter_profile", "Unknown"),
-        "linkedinProfile": final_state.get("linkedin_profile", "Unknown"),
-        "otherProfiles": final_state.get("other_profiles", []),
-        "contactConfidence": final_state.get("contact_confidence", 0),
-        "contactVerification": final_state.get("contact_verification", "Unknown")
+        "businessPain": qual_result.get("problem_detected") or qual_result.get("requested_service_category") or "Immediate technical implementation requirement.",
+        "technology": qual_result.get("requested_service_category") or "Custom Software",
+        "detectedNeed": qual_result.get("requested_service") or req.title,
+        "explicitRequirement": is_active,
+        "intentScore": score,
+        "tierLabel": tier,
+        "iosysService": matched_service,
+        "aiSummary": summary,
+        "company": "Unknown",
+        "companyConfidence": 80,
+        "buyingStage": qual_result.get("intent_type") or "EXPLICIT_SERVICE_REQUEST",
+        "region": "USA",
+        "recommendedAction": f"Strong match for {matched_service}. Propose technical implementation timeline!",
+        "evidence": [
+            f"Active project requirement: {is_active}",
+            f"Looking for external engineering partner: {qual_result.get('is_looking_for_external_provider', True)}",
+            f"Service match confidence: {confidence:.0%}",
+            f"Matched IOSYS Capability: {matched_service}",
+        ],
+        "contactEmail": "Unknown",
+        "contactPhone": "Unknown",
+        "sourceProfileUrl": req.url,
+        "companyWebsite": "Unknown",
+        "contactPage": "Unknown",
+        "githubProfile": "Unknown",
+        "twitterProfile": "Unknown",
+        "linkedinProfile": "Unknown",
+        "otherProfiles": [],
+        "requestedService": qual_result.get("requested_service") or req.title,
+        "requestedServiceCategory": qual_result.get("requested_service_category") or "Software Development",
+        "serviceMatch": is_match,
+        "intentType": qual_result.get("intent_type") or "EXPLICIT_SERVICE_REQUEST",
+    }
+
+
+class DeepQualifyRequest(BaseModel):
+    lead_id: str
+
+@router.post("/leads/deep-qualify")
+async def deep_qualify_lead(req: DeepQualifyRequest, db: Session = Depends(get_db)):
+    from app.agents.intelligence import deep_qualify_post
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.service_catalog import CompanyService
+    
+    # 1. Fetch Lead
+    result = db.execute(select(Lead).where(Lead.id == req.lead_id))
+    lead = result.scalars().first()
+    
+    if not lead:
+        return {"status": "error", "message": "Lead not found"}
+        
+    # 2. Fetch Signal content
+    sig_result = db.execute(select(UnifiedSignalModel).where(UnifiedSignalModel.signal_id == lead.signal_id))
+    signal = sig_result.scalars().first()
+    
+    if not signal:
+        return {"status": "error", "message": "Signal not found for lead"}
+        
+    # 3. Fetch Service Catalog
+    services_result = db.execute(select(CompanyService))
+    all_services = services_result.scalars().all()
+    company_services = [s.name for s in all_services if not s.is_excluded]
+    excluded_services = [s.name for s in all_services if s.is_excluded]
+        
+    # 4. Qualify
+    campaign_name = "Unknown Campaign"
+    if isinstance(signal.content, dict):
+        content_text = signal.content.get("text") or signal.content.get("description") or str(signal.content)
+        title_text = signal.content.get("title") or (signal.title if hasattr(signal, 'title') and signal.title else "Unknown Title")
+    else:
+        content_text = str(signal.content)
+        title_text = signal.title if hasattr(signal, 'title') and signal.title else "Unknown Title"
+        
+    qual_result = await deep_qualify_post(
+        content=content_text,
+        title=title_text,
+        source=signal.source,
+        campaign_name=campaign_name,
+        company_services=company_services,
+        excluded_services=excluded_services
+    )
+
+    
+    if "error" in qual_result:
+        return {"status": "error", "message": qual_result["error"]}
+        
+    # 5. Strictly Calculate Score based on new JSON output
+    is_active_request = qual_result.get("is_active_request", False)
+    looking_ext = qual_result.get("is_looking_for_external_provider", False)
+    service_match = qual_result.get("service_match", False)
+    service_match_confidence = float(qual_result.get("service_match_confidence", 0.0))
+    llm_tier = qual_result.get("lead_status", "REJECTED")
+    reasoning = qual_result.get("ai_summary") or qual_result.get("rejection_reason") or qual_result.get("matched_company_service") or "Unknown"
+    
+    score = 0
+    tier = "LOW"
+    
+    # Strict matching rule
+    if is_active_request and looking_ext and service_match and service_match_confidence >= 0.75:
+        score = int(70 + (service_match_confidence * 30))
+        score = min(score, 100)
+        tier = llm_tier if llm_tier in ["HOT", "WARM", "QUALIFIED"] else "HOT"
+    elif is_active_request and looking_ext and service_match and service_match_confidence >= 0.50:
+        score = int(40 + (service_match_confidence * 40))
+        tier = "WARM"
+    else:
+        score = 0
+        tier = "REJECTED"
+        
+    # 6. Update Lead & Signal in DB
+    if signal.metadata_ is None:
+        signal.metadata_ = {}
+        
+    signal.metadata_["priority_score"] = score
+    signal.metadata_["tier_label"] = tier
+    signal.metadata_["ai_reasoning"] = reasoning
+    signal.metadata_["deep_qualification_result"] = qual_result
+    
+    lead.status = "QUALIFIED" if tier in ["HOT", "WARM", "QUALIFIED"] else "REJECTED"
+    
+    flag_modified(signal, "metadata_")
+    db.commit()
+    
+    return {
+        "status": "success",
+        "tier": tier,
+        "score": score,
+        "reason": reasoning,
+        "raw_qualification": qual_result
     }
 
 @router.post("/leads/search")

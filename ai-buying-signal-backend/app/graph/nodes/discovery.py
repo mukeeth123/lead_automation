@@ -8,66 +8,189 @@ from app.agents.intelligence import call_llm_with_fallback
 logger = logging.getLogger(__name__)
 
 async def generate_queries(state: LeadDiscoveryState) -> LeadDiscoveryState:
-    raw_query = state.get("search_queries", [""])[0]
+    campaign_name = state.get("campaign_name", state.get("search_queries", [""])[0] if state.get("search_queries") else "AI")
     
-    # Read the keyword database to inject into the LLM
-    import os
-    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "agents", "keyword_database.md")
-    try:
-        with open(db_path, "r", encoding="utf-8") as f:
-            keyword_db = f.read()
-    except Exception as e:
-        logger.error(f"Failed to load keyword database: {e}")
-        keyword_db = ""
+    # BYPASS LLM for query generation to save API rate limits exclusively for the qualification phase.
+    # We use static templates infused with the campaign name.
+    queries = [
+        f'"{campaign_name}" "looking for an agency"',
+        f'"{campaign_name}" "need a developer" -jobs',
+        f'"{campaign_name}" "seeking a partner"',
+        f'"{campaign_name}" "looking for a vendor"',
+        f'"{campaign_name}" "implementation help"'
+    ]
     
-    prompt = f"""You are an expert B2B lead generation query builder.
-The user wants to find leads matching this natural language request: "{raw_query}"
-
-Using the following proven Lead Intelligence Keyword Database as inspiration, generate 5 highly targeted, exact search engine queries. 
-CRITICAL: You MUST use advanced search operators like quotes ("exact phrase") and site exclusions (-jobs) to ensure we find actual people asking for help, NOT agency landing pages or SEO lists.
-Example: ["\"need an AI development company\" -jobs -course", "\"looking for a development partner\" AI automation", "site:linkedin.com/posts \"we are still doing this manually\""]
-
-=== KEYWORD DATABASE ===
-{keyword_db[:3000]}
-========================
-
-Return ONLY a valid JSON array of 5 strings. No markdown formatting.
-"""
-    try:
-        full_prompt = "You return valid JSON.\n" + prompt
-        messages = [{"role": "user", "content": full_prompt}]
-        response = await call_llm_with_fallback(messages)
-        queries = json.loads(response)
-        if not isinstance(queries, list):
-            queries = [str(q) for q in queries.values()]
-        return {"search_queries": queries}
-    except Exception as e:
-        logger.error(f"Query generation failed: {e}")
-        fallback = [f'"{raw_query}"']
-        return {"search_queries": fallback, "errors": [f"Query gen error: {e}"]}
+    return {"search_queries": queries}
 
 async def discover_searxng(state: LeadDiscoveryState) -> LeadDiscoveryState:
-    queries = state.get("search_queries", [])
+    import feedparser
+    import asyncio
+    
+    import urllib.parse
+    campaign_name = state.get("campaign_name", "AI")
+    
+    # Clean up the campaign name and encode it for URLs
+    # e.g., "UI/UX" -> "UI%2FUX"
+    base_kw = urllib.parse.quote(campaign_name)
+    
     urls = []
     
-    try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            for q in queries:
-                try:
-                    results = list(ddgs.text(q, max_results=10))
-                    for r in results:
+    async def fetch_reddit():
+        try:
+            async with httpx.AsyncClient() as client:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                resp = await client.get(f"https://www.reddit.com/r/Entrepreneur/search.rss?q={base_kw}&restrict_sr=1&sort=new&limit=30", headers=headers, timeout=10.0)
+                feed = feedparser.parse(resp.text)
+                for entry in feed.entries:
+                    urls.append({"url": entry.link, "source": "Reddit", "title": entry.title, "snippet": entry.summary})
+                
+                # Broaden search if empty
+                if not feed.entries:
+                    fallback_kw = urllib.parse.quote(f"{campaign_name} looking for agency")
+                    resp = await client.get(f"https://www.reddit.com/search.rss?q={fallback_kw}&sort=new&limit=30", headers=headers, timeout=10.0)
+                    feed = feedparser.parse(resp.text)
+                    for entry in feed.entries:
+                        urls.append({"url": entry.link, "source": "Reddit", "title": entry.title, "snippet": entry.summary})
+
+        except Exception as e:
+            logger.error(f"Reddit RSS error: {e}")
+            
+    async def fetch_indie_hackers():
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"https://feed.indiehackers.world/posts.rss?q={base_kw}", timeout=10.0)
+                feed = feedparser.parse(resp.text)
+                for entry in feed.entries[:30]:
+                    urls.append({"url": entry.link, "source": "Indie Hackers", "title": entry.title, "snippet": entry.summary})
+        except Exception as e:
+            logger.error(f"IndieHackers RSS error: {e}")
+            
+    async def fetch_remote_ok():
+        try:
+            async with httpx.AsyncClient() as client:
+                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                resp = await client.get(f"https://remoteok.com/api?tag={base_kw}", headers=headers, timeout=10.0)
+                data = resp.json()
+                for item in data[1:30]:
+                    urls.append({"url": item.get("url"), "source": "Remote OK", "title": item.get("position"), "snippet": item.get("description", "")})
+        except Exception as e:
+            logger.error(f"RemoteOK API error: {e}")
+
+    async def fetch_hn():
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"https://hn.algolia.com/api/v1/search_by_date?query={base_kw}&tags=story&hitsPerPage=30", timeout=10.0)
+                data = resp.json()
+                for item in data.get("hits", []):
+                    urls.append({"url": item.get("url") or f"https://news.ycombinator.com/item?id={item.get('objectID')}", "source": "HackerNews", "title": item.get("title"), "snippet": ""})
+        except Exception as e:
+            logger.error(f"HN API error: {e}")
+            
+    async def fetch_upwork():
+        try:
+            async with httpx.AsyncClient() as client:
+                headers = {"User-Agent": "Mozilla/5.0"}
+                resp = await client.get(f"https://www.upwork.com/ab/feed/jobs/rss?q={base_kw}", headers=headers, timeout=10.0)
+                feed = feedparser.parse(resp.text)
+                for entry in feed.entries[:20]:
+                    urls.append({"url": entry.link, "source": "Upwork", "title": entry.title, "snippet": entry.summary})
+        except Exception as e:
+            logger.error(f"Upwork RSS error: {e}")
+
+    # Use DDG to search the exact queries generated by the LLM from the keyword database
+    async def fetch_ddg():
+        try:
+            from ddgs import DDGS
+            with DDGS() as ddgs:
+                queries = state.get("search_queries", [])
+                # Run the top 3 queries generated by LLM
+                for q in queries[:3]:
+                    try:
+                        results = list(ddgs.text(q, max_results=5))
+                        for r in results:
+                            urls.append({"url": r.get("href"), "source": "searxng", "title": r.get("title", ""), "snippet": r.get("body", "")})
+                    except Exception as e:
+                        logger.error(f"DDG search error for {q}: {e}")
+        except Exception:
+            pass
+
+    async def fetch_pph_freelancer():
+        # Freelancer API
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"https://www.freelancer.com/api/projects/0.1/projects/active/?query={base_kw}&limit=15", timeout=10.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    projects = data.get('result', {}).get('projects', [])
+                    for p in projects:
                         urls.append({
-                            "url": r.get("href"),
-                            "source": "searxng",
-                            "title": r.get("title", ""),
-                            "snippet": r.get("body", "")
+                            "url": f"https://www.freelancer.com/projects/{p.get('seo_url')}",
+                            "source": "Freelancer",
+                            "title": p.get("title", ""),
+                            "snippet": p.get("preview_description", "")
                         })
-                except Exception as e:
-                    logger.error(f"DDG search error for {q}: {e}")
-    except Exception as e:
-        logger.error(f"DDGS init error: {e}")
-        
+        except Exception as e:
+            logger.error(f"Freelancer API error: {e}")
+
+        # PeoplePerHour using Playwright
+        try:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
+                
+                query = urllib.parse.quote(campaign_name)
+                url = f"https://www.peopleperhour.com/freelance-jobs?q={query}"
+                await page.goto(url, wait_until="domcontentloaded")
+                
+                # Wait for React hydration
+                await page.wait_for_timeout(3000)
+                
+                # Extract links
+                links = await page.locator('a[href*="/freelance-jobs/"]').element_handles()
+                seen_pph = set()
+                for link in links:
+                    if len(urls) >= 100: # safety limit
+                        break
+                    href = await link.get_attribute("href")
+                    text = await link.inner_text()
+                    
+                    if href and "-" in href and href.count("-") > 2: # heuristic for project pages
+                        if href not in seen_pph:
+                            seen_pph.add(href)
+                            urls.append({
+                                "url": href if href.startswith("http") else f"https://www.peopleperhour.com{href}",
+                                "source": "PeoplePerHour",
+                                "title": text.strip(),
+                                "snippet": ""
+                            })
+                await browser.close()
+        except Exception as e:
+            logger.error(f"Playwright PPH error: {e}")
+
+    async def fetch_bubble_forum():
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("https://forum.bubble.io/latest.json", timeout=10.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    topics = data.get('topic_list', {}).get('topics', [])
+                    for t in topics[:20]:
+                        urls.append({
+                            "url": f"https://forum.bubble.io/t/{t.get('slug')}/{t.get('id')}",
+                            "source": "Bubble Forum",
+                            "title": t.get("title", ""),
+                            "snippet": ""
+                        })
+        except Exception as e:
+            logger.error(f"Bubble Forum error: {e}")
+
+    # Run them all concurrently
+    await asyncio.gather(fetch_reddit(), fetch_indie_hackers(), fetch_remote_ok(), fetch_hn(), fetch_upwork(), fetch_ddg(), fetch_pph_freelancer(), fetch_bubble_forum())
+    
     return {"discovered_urls": urls}
 
 def merge_and_deduplicate(state: LeadDiscoveryState) -> LeadDiscoveryState:
