@@ -56,7 +56,8 @@ async def seed_filtered_freelancer():
         db.add(lead)
         db.commit()
         saved_count += 1
-        print(f"[{saved_count}] Saved Freelancer.com lead: {s.title[:50]}...")
+        safe_title = s.title[:50].encode('ascii', 'ignore').decode('ascii')
+        print(f"[{saved_count}] Saved Freelancer.com lead: {safe_title}...")
 
     db.close()
     print("Seeding complete.")

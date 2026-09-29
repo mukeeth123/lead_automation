@@ -20,7 +20,8 @@ const SOURCES = [
   { id: "indiehackers", name: "Indie Hackers", tag: "IH" },
   { id: "peopleperhour", name: "PeoplePerHour", tag: "PPH" },
   { id: "bubble_forum", name: "Bubble Forum", tag: "BUB" },
-  { id: "reddit", name: "Reddit", tag: "RDT" }
+  { id: "reddit", name: "Reddit", tag: "RDT" },
+  { id: "github", name: "GitHub", tag: "GITH" }
 ];
 const SOURCE_MAP = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
 SOURCE_MAP["Freelancer.com"] = SOURCE_MAP["freelancer"];
@@ -35,6 +36,7 @@ SOURCE_MAP["PeoplePerHour"] = SOURCE_MAP["peopleperhour"];
 SOURCE_MAP["people_per_hour"] = SOURCE_MAP["peopleperhour"];
 SOURCE_MAP["Bubble Forum"] = SOURCE_MAP["bubble_forum"];
 SOURCE_MAP["Reddit"] = SOURCE_MAP["reddit"];
+SOURCE_MAP["github"] = SOURCE_MAP["github"];
 
 const TECHNOLOGIES = [
   "RAG", "LLM", "AI Agents", "GenAI", "Automation", "Custom Software",
@@ -394,6 +396,13 @@ function SourceTag({ id }) {
 
 function SourceIcon({ id, size = 18 }) {
   switch (id) {
+    case "github":
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24">
+          <rect width="24" height="24" rx="4" fill="#24292e" />
+          <path d="M12 4.2c-4.4 0-8 3.6-8 8 0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1.1-2.7-1.1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.2-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3s1.4.1 2 .3c1.5-1 2.2-.8 2.2-.8.4 1.1.1 1.9.1 2.1.5.6.8 1.3.8 2.2 0 3.1-1.9 3.8-3.7 4 .3.3.6.8.6 1.6v2.4c0 .2.1.5.5.4 3.2-1.1 5.5-4.1 5.5-7.6 0-4.4-3.6-8-8-8z" fill="#fff"/>
+        </svg>
+      );
     case "reddit":
       return (
         <svg width={size} height={size} viewBox="0 0 24 24">
@@ -2044,6 +2053,7 @@ const NAV_ITEMS = [
   { id: "leads", label: "Leads" },
   { id: "sources", label: "Source Intelligence" },
   { id: "companies", label: "Companies + Analytics" },
+  { id: "target_accounts", label: "Target Accounts" },
 ];
 
 function emptyFilters() {
@@ -2140,6 +2150,243 @@ function CampaignsPage({ nav }) {
         ))}
         {campaigns.length === 0 && <div style={{ color: "var(--ink-soft)", fontSize: 14 }}>No campaigns found. Create one above.</div>}
       </div>
+    </div>
+  );
+}
+
+
+
+
+
+function TargetAccountsPage() {
+  const [query, setQuery] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [savedCompanies, setSavedCompanies] = React.useState([]);
+  const [currentCompany, setCurrentCompany] = React.useState(null);
+  
+  // Chat State
+  const [chatMessage, setChatMessage] = React.useState("");
+  const [chatHistory, setChatHistory] = React.useState([]);
+  const [chatLoading, setChatLoading] = React.useState(false);
+  const chatEndRef = React.useRef(null);
+
+  React.useEffect(() => {
+    fetchSaved();
+  }, []);
+  
+  React.useEffect(() => {
+    if(chatEndRef.current) {
+        chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatHistory]);
+
+  async function fetchSaved() {
+    try {
+      const res = await axios.get("http://localhost:8000/api/v1/companies/");
+      setSavedCompanies(res.data.companies || []);
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  async function handleSearch(e) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setLoading(true);
+    setCurrentCompany(null);
+    setChatHistory([]);
+    try {
+      const res = await axios.post("http://localhost:8000/api/v1/companies/analyze", { query });
+      setCurrentCompany(res.data);
+      fetchSaved();
+    } catch(e) {
+      console.error(e);
+      alert("Failed to analyze company");
+    }
+    setLoading(false);
+  }
+  
+  async function handleChat(e) {
+      e.preventDefault();
+      if(!chatMessage.trim() || !currentCompany || chatLoading) return;
+      
+      const userMsg = chatMessage;
+      setChatMessage("");
+      setChatHistory(prev => [...prev, { role: "user", text: userMsg }]);
+      setChatLoading(true);
+      
+      try {
+          const res = await axios.post(`http://localhost:8000/api/v1/companies/${currentCompany.id}/chat`, { message: userMsg });
+          setChatHistory(prev => [...prev, { role: "agent", text: res.data.reply }]);
+      } catch(e) {
+          console.error(e);
+          setChatHistory(prev => [...prev, { role: "agent", text: "Sorry, I encountered an error. Please try again." }]);
+      }
+      setChatLoading(false);
+  }
+
+  return (
+    <div style={{ maxWidth: 900 }}>
+      <h2 style={{ fontFamily: "var(--font-display)", margin: "0 0 8px 0" }}>Target Accounts (ICP Matcher)</h2>
+      <p style={{ color: "var(--ink-soft)", marginBottom: 24, fontSize: 14 }}>
+        Search for any company to instantly scrape their website and generate an AI-powered ICP score, identifying their pain points, recent news/funding, and giving you a custom pitch angle.
+      </p>
+
+      <form onSubmit={handleSearch} style={{ display: "flex", gap: 12, marginBottom: 32 }}>
+        <input 
+          placeholder="Enter a company name (e.g. Stripe, Acme Corp)" 
+          value={query} 
+          onChange={e => setQuery(e.target.value)}
+          style={{ flex: 1, padding: "12px 16px", fontSize: 15, border: "1px solid var(--line)", borderRadius: 6, outline: "none" }}
+        />
+        <button type="submit" disabled={loading} style={{ background: "var(--accent-teal)", color: "#fff", padding: "0 24px", borderRadius: 6, border: "none", cursor: loading ? "default" : "pointer", fontWeight: 600, fontSize: 15 }}>
+          {loading ? "Searching & Analyzing..." : "Analyze Company"}
+        </button>
+      </form>
+
+      {currentCompany && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, marginBottom: 32 }}>
+            <div style={{ background: "var(--surface)", padding: 24, borderRadius: 8, border: "1px solid var(--accent-teal)"}}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ margin: "0 0 4px 0", fontSize: 20 }}>{currentCompany.name}</h3>
+                  <div style={{ color: "var(--ink-soft)", fontSize: 13, marginBottom: 12 }}>
+                    {currentCompany.industry} • {currentCompany.location} • <a href={currentCompany.website} target="_blank" style={{ color: "var(--accent-teal)" }}>{currentCompany.website}</a>
+                  </div>
+                  
+                  <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+                    {currentCompany.key_executives && currentCompany.key_executives !== "Unknown" && (
+                      <div style={{ fontSize: 12, background: "var(--surface-2)", padding: "4px 8px", borderRadius: 4, border: "1px solid var(--line)" }}>
+                        <strong style={{color:"var(--ink)"}}>Leaders:</strong> {currentCompany.key_executives}
+                      </div>
+                    )}
+                    {currentCompany.company_size && currentCompany.company_size !== "Unknown" && (
+                      <div style={{ fontSize: 12, background: "var(--surface-2)", padding: "4px 8px", borderRadius: 4, border: "1px solid var(--line)" }}>
+                        <strong style={{color:"var(--ink)"}}>Size:</strong> {currentCompany.company_size}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 4 }}>ICP Match Score</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "var(--font-mono)", color: currentCompany.icp_score >= 80 ? "var(--accent-teal)" : currentCompany.icp_score >= 60 ? "#F58025" : "var(--accent-rose)" }}>
+                    {currentCompany.icp_score}/100
+                  </div>
+                </div>
+              </div>
+              
+              <p style={{ lineHeight: 1.5, fontSize: 14, marginBottom: 24, paddingBottom: 16, borderBottom: "1px solid var(--line)" }}>{currentCompany.description}</p>
+
+              {currentCompany.sales_triggers && currentCompany.sales_triggers.length > 0 && (
+                 <div style={{ marginBottom: 24 }}>
+                    <h4 style={{ margin: "0 0 12px 0", fontSize: 13, textTransform: "uppercase", color: "var(--accent-teal)" }}>Strategic Sales Triggers</h4>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {currentCompany.sales_triggers.map((t, i) => (
+                        <span key={i} style={{ background: "rgba(11, 169, 134, 0.1)", color: "var(--accent-teal)", padding: "6px 12px", borderRadius: 16, fontSize: 12, fontWeight: 600 }}>{t}</span>
+                      ))}
+                    </div>
+                 </div>
+              )}
+
+              {currentCompany.latest_updates && currentCompany.latest_updates.length > 0 && currentCompany.latest_updates[0] !== "No major news or funding announced recently." && (
+                <div style={{ marginBottom: 24, padding: "16px", background: "var(--surface-2)", borderRadius: 6, borderLeft: "4px solid #F58025" }}>
+                  <h4 style={{ margin: "0 0 12px 0", fontSize: 13, textTransform: "uppercase", color: "#F58025" }}>Recent News & Funding Updates</h4>
+                  <ul style={{ paddingLeft: 16, margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                    {currentCompany.latest_updates.map((p, i) => <li key={i} style={{ marginBottom: 6 }}>{p}</li>)}
+                  </ul>
+                </div>
+              )}
+              
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                <div>
+                  <h4 style={{ margin: "0 0 12px 0", fontSize: 13, textTransform: "uppercase", color: "var(--ink-soft)" }}>Identified Pain Points</h4>
+                  <ul style={{ paddingLeft: 16, margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                    {currentCompany.pain_points?.map((p, i) => <li key={i} style={{ marginBottom: 6 }}>{p}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <h4 style={{ margin: "0 0 12px 0", fontSize: 13, textTransform: "uppercase", color: "var(--accent-teal)" }}>How to Pitch Them</h4>
+                  <ul style={{ paddingLeft: 16, margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                    {currentCompany.pitch_recommendations?.map((p, i) => <li key={i} style={{ marginBottom: 6 }}>{p}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </div>
+            
+            {/* Chatbot Interface */}
+            <div style={{ background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 8, display: "flex", flexDirection: "column", height: 400 }}>
+                <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", background: "var(--surface-2)", borderTopLeftRadius: 8, borderTopRightRadius: 8 }}>
+                    <h3 style={{ margin: 0, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-teal)" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                        Ask AI about {currentCompany.name}
+                    </h3>
+                    <p style={{ margin: "4px 0 0 0", fontSize: 12, color: "var(--ink-soft)" }}>Dive deeper into their products, recent revenue, or sales strategy.</p>
+                </div>
+                <div style={{ flex: 1, padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16 }}>
+                    {chatHistory.length === 0 && (
+                        <div style={{ textAlign: "center", color: "var(--ink-soft)", margin: "auto", fontSize: 13 }}>
+                            No messages yet. Ask me anything about this company!
+                        </div>
+                    )}
+                    {chatHistory.map((msg, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                            <div style={{ 
+                                maxWidth: "75%", 
+                                padding: "10px 14px", 
+                                borderRadius: 12, 
+                                fontSize: 14, 
+                                lineHeight: 1.5,
+                                background: msg.role === "user" ? "var(--accent-teal)" : "var(--surface-2)",
+                                color: msg.role === "user" ? "#fff" : "var(--ink)",
+                                borderBottomRightRadius: msg.role === "user" ? 2 : 12,
+                                borderBottomLeftRadius: msg.role === "user" ? 12 : 2
+                            }}>
+                                {msg.text}
+                            </div>
+                        </div>
+                    ))}
+                    {chatLoading && (
+                        <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                            <div style={{ background: "var(--surface-2)", padding: "10px 14px", borderRadius: 12, fontSize: 13, color: "var(--ink-soft)" }}>
+                                Thinking...
+                            </div>
+                        </div>
+                    )}
+                    <div ref={chatEndRef} />
+                </div>
+                <form onSubmit={handleChat} style={{ borderTop: "1px solid var(--line)", padding: 16, display: "flex", gap: 12, background: "var(--bg)" }}>
+                    <input 
+                        placeholder="e.g. What is their core product?"
+                        value={chatMessage}
+                        onChange={e => setChatMessage(e.target.value)}
+                        style={{ flex: 1, padding: "10px 16px", borderRadius: 20, border: "1px solid var(--line)", outline: "none", fontSize: 14 }}
+                    />
+                    <button type="submit" disabled={chatLoading || !chatMessage.trim()} style={{ background: chatMessage.trim() ? "var(--accent-teal)" : "var(--line)", color: "#fff", border: "none", borderRadius: 20, padding: "0 20px", fontWeight: 600, cursor: chatMessage.trim() ? "pointer" : "default" }}>
+                        Send
+                    </button>
+                </form>
+            </div>
+        </div>
+      )}
+
+      {savedCompanies.length > 0 && !loading && !currentCompany && (
+        <div>
+          <h3 style={{ margin: "0 0 16px 0" }}>Saved Accounts</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {savedCompanies.map(c => (
+              <div key={c.id} onClick={() => { setCurrentCompany(c); setChatHistory([]); }} style={{ background: "var(--surface)", padding: "16px 20px", borderRadius: 6, border: "1px solid var(--line)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{c.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>{c.industry} • {c.company_size || "Unknown Size"}</div>
+                </div>
+                <div style={{ fontWeight: 700, fontFamily: "var(--font-mono)", color: c.icp_score >= 80 ? "var(--accent-teal)" : c.icp_score >= 60 ? "#F58025" : "var(--accent-rose)" }}>
+                  {c.icp_score}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2279,6 +2526,7 @@ export default function App() {
         {page === "leads" && <LeadsPage leads={leads} filters={filters} setFilters={setFilters} nav={nav} setLeads={setLeads} />}
         {page === "sources" && <SourceIntelPage leads={leads} activeSource={activeSource} setActiveSource={setActiveSource} nav={nav} />}
         {page === "companies" && <CompaniesPage leads={leads} nav={nav} />}
+        {page === "target_accounts" && <TargetAccountsPage />}
         {page === "lead" && <LeadIntelPage lead={selectedLead} leads={leads} nav={nav} />}
       </div>
     </div>

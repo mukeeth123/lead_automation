@@ -1,0 +1,123 @@
+﻿import sys
+
+comp = """
+function TargetAccountsPage() {
+  const [query, setQuery] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [savedCompanies, setSavedCompanies] = React.useState([]);
+  const [currentCompany, setCurrentCompany] = React.useState(null);
+
+  React.useEffect(() => {
+    fetchSaved();
+  }, []);
+
+  async function fetchSaved() {
+    try {
+      const res = await axios.get("http://localhost:8000/api/v1/companies/");
+      setSavedCompanies(res.data.companies || []);
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  async function handleSearch(e) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setLoading(true);
+    setCurrentCompany(null);
+    try {
+      const res = await axios.post("http://localhost:8000/api/v1/companies/analyze", { query });
+      setCurrentCompany(res.data);
+      fetchSaved();
+    } catch(e) {
+      console.error(e);
+      alert("Failed to analyze company");
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ maxWidth: 900 }}>
+      <h2 style={{ fontFamily: "var(--font-display)", margin: "0 0 8px 0" }}>Target Accounts (ICP Matcher)</h2>
+      <p style={{ color: "var(--ink-soft)", marginBottom: 24, fontSize: 14 }}>
+        Search for any company to instantly scrape their website and generate an AI-powered ICP (Ideal Customer Profile) score, identifying their pain points and giving you a custom pitch angle for your AI Agent services.
+      </p>
+
+      <form onSubmit={handleSearch} style={{ display: "flex", gap: 12, marginBottom: 32 }}>
+        <input 
+          placeholder="Enter a company name (e.g. Stripe, Acme Corp)" 
+          value={query} 
+          onChange={e => setQuery(e.target.value)}
+          style={{ flex: 1, padding: "12px 16px", fontSize: 15, border: "1px solid var(--line)", borderRadius: 6, outline: "none" }}
+        />
+        <button type="submit" disabled={loading} style={{ background: "var(--accent-teal)", color: "#fff", padding: "0 24px", borderRadius: 6, border: "none", cursor: loading ? "default" : "pointer", fontWeight: 600, fontSize: 15 }}>
+          {loading ? "Searching & Analyzing..." : "Analyze Company"}
+        </button>
+      </form>
+
+      {currentCompany && (
+        <div style={{ background: "var(--surface)", padding: 24, borderRadius: 8, border: "1px solid var(--accent-teal)", marginBottom: 32 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <div>
+              <h3 style={{ margin: "0 0 4px 0", fontSize: 20 }}>{currentCompany.name}</h3>
+              <div style={{ color: "var(--ink-soft)", fontSize: 13, marginBottom: 12 }}>
+                {currentCompany.industry} • {currentCompany.location} • <a href={currentCompany.website} target="_blank" style={{ color: "var(--accent-teal)" }}>{currentCompany.website}</a>
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", marginBottom: 4 }}>ICP Match Score</div>
+              <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "var(--font-mono)", color: currentCompany.icp_score >= 80 ? "var(--accent-teal)" : currentCompany.icp_score >= 60 ? "#F58025" : "var(--accent-rose)" }}>
+                {currentCompany.icp_score}/100
+              </div>
+            </div>
+          </div>
+          
+          <p style={{ lineHeight: 1.5, fontSize: 14 }}>{currentCompany.description}</p>
+          
+          <div style={{ marginTop: 24, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div>
+              <h4 style={{ margin: "0 0 12px 0", fontSize: 13, textTransform: "uppercase", color: "var(--ink-soft)" }}>Identified Pain Points</h4>
+              <ul style={{ paddingLeft: 16, margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                {currentCompany.pain_points?.map((p, i) => <li key={i} style={{ marginBottom: 6 }}>{p}</li>)}
+              </ul>
+            </div>
+            <div>
+              <h4 style={{ margin: "0 0 12px 0", fontSize: 13, textTransform: "uppercase", color: "var(--accent-teal)" }}>How to Pitch Them</h4>
+              <ul style={{ paddingLeft: 16, margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+                {currentCompany.pitch_recommendations?.map((p, i) => <li key={i} style={{ marginBottom: 6 }}>{p}</li>)}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {savedCompanies.length > 0 && !loading && !currentCompany && (
+        <div>
+          <h3 style={{ margin: "0 0 16px 0" }}>Saved Accounts</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {savedCompanies.map(c => (
+              <div key={c.id} onClick={() => setCurrentCompany(c)} style={{ background: "var(--surface)", padding: "16px 20px", borderRadius: 6, border: "1px solid var(--line)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{c.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)", marginTop: 4 }}>{c.industry}</div>
+                </div>
+                <div style={{ fontWeight: 700, fontFamily: "var(--font-mono)", color: c.icp_score >= 80 ? "var(--accent-teal)" : c.icp_score >= 60 ? "#F58025" : "var(--accent-rose)" }}>
+                  {c.icp_score}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+"""
+
+with open(r'C:\Users\mukee\social media listening\frontend\src\App.jsx', 'r', encoding='utf8') as f:
+    content = f.read()
+
+content = content.replace("export default function App() {", comp + "\nexport default function App() {")
+
+with open(r'C:\Users\mukee\social media listening\frontend\src\App.jsx', 'w', encoding='utf8') as f:
+    f.write(content)

@@ -15,11 +15,12 @@ from app.schemas.signal import RawSignalCreate
 class RedditAgent:
     def __init__(self):
         self.subreddits = [
-            "forhire",
-            "freelance_forhire",
-            "jobbit",
-            "techjobs",
-            "remote_jobs"
+            "Entrepreneur",
+            "SaaS",
+            "startups",
+            "SideProject",
+            "cofounder",
+            "smallbusiness"
         ]
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
@@ -49,11 +50,13 @@ class RedditAgent:
 
         # Must have buyer indicators
         buyer_patterns = [
-            "[hiring]", "hiring", "[paid]", "looking for a developer", "looking for an engineer",
-            "need a developer", "need an engineer", "looking for an agency", "looking to hire",
-            "contract implementer", "seeking developer", "developer wanted"
+            "looking for a developer", "looking for an engineer", "need a developer", 
+            "need an engineer", "looking for an agency", "looking to hire",
+            "seeking developer", "developer wanted", "need help building", 
+            "looking for a technical cofounder", "need a tech cofounder", "app development cost",
+            "how to build", "hiring a dev"
         ]
-        if not any(p in title.lower() for p in buyer_patterns):
+        if not any(p in combined for p in buyer_patterns):
             return False
 
         # Must match tech domain keywords
@@ -84,9 +87,9 @@ class RedditAgent:
                             
                             if self._is_seller(title + " " + clean_desc):
                                 continue
-                            if not self._is_tech_buyer(title, clean_desc):
-                                continue
-
+                                
+                            # Less strict checks for these business subreddits
+                            
                             link = getattr(entry, 'link', '')
                             if not link or "reddit.com/r/" not in link or "/comments/" not in link:
                                 continue

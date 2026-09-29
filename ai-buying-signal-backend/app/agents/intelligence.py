@@ -18,7 +18,7 @@ groq_client = AsyncOpenAI(
     api_key=os.environ.get("FALLBACK_API_KEY", os.environ.get("GROQ_API_KEY"))
 )
 
-GROQ_MODEL = os.environ.get("FALLBACK_MODEL", os.environ.get("GROQ_MODEL", "groq/compound-mini"))
+GROQ_MODEL = os.environ.get("FALLBACK_MODEL", os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"))
 
 # Global rate limiting and deduplication
 _global_primary_semaphore = None

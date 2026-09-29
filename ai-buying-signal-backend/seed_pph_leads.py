@@ -9,7 +9,7 @@ from app.models.raw_event import RawEvent
 from app.graph.nodes.qualification import static_pre_filter
 from playwright.async_api import async_playwright
 
-queries = ["web development", "Voice ai", "AI enterprise platform", "mobile applications"]
+queries = ["AI agents", "Voice AI", "enterprise development platform", "building agents", "workflow automations"]
 
 async def seed_pph():
     db = SyncSessionLocal()

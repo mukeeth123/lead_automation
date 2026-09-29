@@ -87,9 +87,17 @@ def is_tech_buyer(title: str, desc: str) -> bool:
         "[hiring]", "hiring", "[paid]", "looking for a developer", "looking for an engineer",
         "need a developer", "need an engineer", "looking for an agency", "looking to hire",
         "contract implementer", "seeking developer", "developer wanted", "engineer wanted",
-        "consultant", "lead gen operator", "dba", "specialist"
+        "consultant", "lead gen operator", "dba", "specialist",
+        "need help building", "looking for someone to build", "freelance developer",
+        "build an mvp", "looking for a technical cofounder", "need a technical cofounder",
+        
+        # Casual discussion loosenings:
+        "how do i build", "how to build", "where to start", "app idea", 
+        "building an app", "building a platform", "want to build", "anyone want to build", 
+        "seeking advice on building", "how much does it cost to build", "best stack for", 
+        "best framework for"
     ]
-    if not any(p in title.lower() for p in buyer_indicators):
+    if not any(p in combined for p in buyer_indicators):
         return False
 
     tech_domains = [
@@ -110,56 +118,69 @@ def harvest_and_seed_reddit():
         "freelance_forhire",
         "jobbit",
         "remote_jobs",
-        "techjobs"
+        "techjobs",
+        "SaaS",
+        "startups",
+        "Entrepreneur",
+        "SideProject",
+        "cofounder",
+        "webdev"
     ]
 
+    # Use a single multi-subreddit request to bypass 429 rate limits
+    multi_sub = "+".join(subreddits)
     all_signals = []
     seen_urls = set()
 
-    for sub in subreddits:
-        try:
-            url = f"https://www.reddit.com/r/{sub}/new.rss?limit=100"
-            print(f"Fetching RSS feed from r/{sub}...")
-            resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=15.0)
-            if resp.status_code == 200:
-                feed = feedparser.parse(resp.text)
-                print(f"r/{sub}: parsed {len(feed.entries)} entries.")
-                for entry in feed.entries:
-                    title = entry.title
-                    desc = getattr(entry, 'description', '')
-                    clean_desc = re.sub(r'<[^>]+>', ' ', desc)
-                    clean_desc = html.unescape(clean_desc)
-                    clean_desc = " ".join(clean_desc.split())
+    try:
+        url = f"https://www.reddit.com/r/{multi_sub}/new.rss?limit=100"
+        print(f"Fetching RSS feed from r/{multi_sub}...")
+        resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=15.0)
+        if resp.status_code == 200:
+            feed = feedparser.parse(resp.text)
+            print(f"Multi-subreddit feed: parsed {len(feed.entries)} entries.")
+            for entry in feed.entries:
+                title = entry.title
+                desc = getattr(entry, 'description', '')
+                clean_desc = re.sub(r'<[^>]+>', ' ', desc)
+                clean_desc = html.unescape(clean_desc)
+                clean_desc = " ".join(clean_desc.split())
+                
+                if is_seller_or_jobseeker(title, clean_desc):
+                    continue
                     
-                    if is_seller_or_jobseeker(title, clean_desc):
-                        continue
-                        
-                    if not is_tech_buyer(title, clean_desc):
-                        continue
+                if not is_tech_buyer(title, clean_desc):
+                    continue
 
-                    link = entry.link
-                    if not link or "reddit.com/r/" not in link or "/comments/" not in link:
-                        continue
+                link = entry.link
+                if not link or "reddit.com/r/" not in link or "/comments/" not in link:
+                    continue
 
-                    if link in seen_urls:
-                        continue
-                    seen_urls.add(link)
+                if link in seen_urls:
+                    continue
+                seen_urls.add(link)
+                
+                # Try to extract the actual subreddit from the link
+                # link format: https://www.reddit.com/r/startups/comments/...
+                sub_match = re.search(r'reddit\.com/r/([^/]+)/', link)
+                actual_sub = sub_match.group(1) if sub_match else "unknown"
 
-                    pub_date = datetime.now(timezone.utc)
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed), timezone.utc)
+                pub_date = datetime.now(timezone.utc)
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed), timezone.utc)
 
-                    all_signals.append({
-                        "title": title,
-                        "url": link,
-                        "author": getattr(entry, 'author', '/u/Reddit_Client').replace('/u/', ''),
-                        "content": clean_desc,
-                        "published_at": pub_date,
-                        "subreddit": sub
-                    })
-            time.sleep(1.5)
-        except Exception as e:
-            print(f"Error fetching r/{sub}: {e}")
+                all_signals.append({
+                    "title": title,
+                    "url": link,
+                    "author": getattr(entry, 'author', '/u/Reddit_Client').replace('/u/', ''),
+                    "content": clean_desc,
+                    "published_at": pub_date,
+                    "subreddit": actual_sub
+                })
+        else:
+            print(f"Multi-subreddit request failed with status code {resp.status_code}")
+    except Exception as e:
+        print(f"Error fetching multi-subreddit feed: {e}")
 
     print(f"Filtered {len(all_signals)} top-tier tech buyer signals from Reddit.")
 

@@ -28,3 +28,5 @@ setup_logging_and_tracing()
 app.include_router(campaigns_router, prefix="/api/v1/campaigns")
 app.include_router(services_router, prefix="/api/v1")
 app.include_router(health_router)
+from app.api.v1.companies import router as companies_router
+app.include_router(companies_router, prefix="/api/v1/companies", tags=["companies"])
